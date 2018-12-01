@@ -80,7 +80,3 @@ func main() {
     }
 }
 ```
-
-## License
-
-MIT
