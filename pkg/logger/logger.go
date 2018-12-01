@@ -12,12 +12,26 @@ import (
 // Logger middleware
 type Logger struct {
 	Writer io.Writer
+
+	RequestID      string
+	ForwardedFor   string
+	ForwardedProto string
 }
 
 // ServeHandler implements middleware interface
 func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 	if m.Writer == nil {
 		m.Writer = os.Stdout
+	}
+
+	if m.RequestID == "" {
+		m.RequestID = "X-Request-Id"
+	}
+	if m.ForwardedFor == "" {
+		m.ForwardedFor = "X-Forwarded-For"
+	}
+	if m.ForwardedProto == "" {
+		m.ForwardedProto = "X-Forwarded-Proto"
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -27,10 +41,11 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 		d.URI = r.RequestURI
 		d.UserAgent = r.UserAgent()
 		d.Referer = r.Referer()
-		d.RemoteIP = net.ParseIP(r.RemoteAddr).String()
-		d.ForwardedFor = r.Header.Get("X-Forwarded-For")
-		d.ForwardedProto = r.Header.Get("X-Forwarded-Proto")
+		d.RemoteIP, _, _ = net.SplitHostPort(r.RemoteAddr)
+		d.ForwardedFor = r.Header.Get(m.ForwardedFor)
+		d.ForwardedProto = r.Header.Get(m.ForwardedProto)
 		d.ContentLength = r.ContentLength
+		d.RequestID = r.Header.Get(m.RequestID)
 
 		start := time.Now()
 		nw := responseWriter{ResponseWriter: w}
@@ -64,6 +79,7 @@ type record struct {
 	ContentLength     int64  `json:"content_length,omitempty"`
 	StatusCode        int    `json:"status_code"`
 	ResponseBodyBytes int64  `json:"response_body_bytes,omitempty"`
+	RequestID         string `json:"request_id"`
 }
 
 type responseWriter struct {

@@ -2,13 +2,13 @@ package hideheaders
 
 import "net/http"
 
-// HideHeaders hides upstream headers from client
-type HideHeaders struct {
+// Response hides response headers from client
+type Response struct {
 	Headers []string
 }
 
 // ServeHandler implements middleware interface
-func (m *HideHeaders) ServeHandler(h http.Handler) http.Handler {
+func (m *Response) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}

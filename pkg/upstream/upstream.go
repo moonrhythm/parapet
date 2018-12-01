@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"crypto/tls"
 	"net"
 	"net/http"
 	"net/http/httputil"
@@ -12,10 +13,12 @@ import (
 type Upstream struct {
 	Target                string
 	DialTimeout           time.Duration
-	KeepAlive             time.Duration
+	TCPKeepAlive          time.Duration
+	DisableKeepAlives     bool
 	MaxIdleConns          int
 	IdleConnTimeout       time.Duration
 	ResponseHeaderTimeout time.Duration
+	VerifyCA              bool
 }
 
 // ServeHandler implements middleware interface
@@ -28,8 +31,8 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 	if m.DialTimeout == 0 {
 		m.DialTimeout = 30 * time.Second
 	}
-	if m.KeepAlive == 0 {
-		m.KeepAlive = 30 * time.Second
+	if m.TCPKeepAlive == 0 {
+		m.TCPKeepAlive = 30 * time.Second
 	}
 	if m.MaxIdleConns == 0 {
 		m.MaxIdleConns = 100
@@ -39,13 +42,18 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	r := httputil.NewSingleHostReverseProxy(target)
+	r.BufferPool = bytesPool
 	r.Transport = &http.Transport{
 		Proxy: http.ProxyFromEnvironment,
 		DialContext: (&net.Dialer{
 			Timeout:   m.DialTimeout,
-			KeepAlive: m.KeepAlive,
+			KeepAlive: m.TCPKeepAlive,
 			DualStack: true,
 		}).DialContext,
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: !m.VerifyCA,
+		},
+		DisableKeepAlives:     m.DisableKeepAlives,
 		MaxIdleConns:          m.MaxIdleConns,
 		MaxIdleConnsPerHost:   m.MaxIdleConns,
 		IdleConnTimeout:       m.IdleConnTimeout,
