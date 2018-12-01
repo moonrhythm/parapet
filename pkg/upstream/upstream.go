@@ -2,16 +2,19 @@ package upstream
 
 import (
 	"crypto/tls"
+	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 )
 
 // Upstream middleware
 type Upstream struct {
 	Target                string
+	Host                  string // override host
 	DialTimeout           time.Duration
 	TCPKeepAlive          time.Duration
 	DisableKeepAlives     bool
@@ -19,6 +22,7 @@ type Upstream struct {
 	IdleConnTimeout       time.Duration
 	ResponseHeaderTimeout time.Duration
 	VerifyCA              bool
+	ErrorLog              *log.Logger
 }
 
 // ServeHandler implements middleware interface
@@ -41,27 +45,62 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 		m.IdleConnTimeout = 90 * time.Second
 	}
 
-	r := httputil.NewSingleHostReverseProxy(target)
-	r.BufferPool = bytesPool
-	r.Transport = &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   m.DialTimeout,
-			KeepAlive: m.TCPKeepAlive,
-			DualStack: true,
-		}).DialContext,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: !m.VerifyCA,
+	targetQuery := target.RawQuery
+	r := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+			req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
+			if targetQuery == "" || req.URL.RawQuery == "" {
+				req.URL.RawQuery = targetQuery + req.URL.RawQuery
+			} else {
+				req.URL.RawQuery = targetQuery + "&" + req.URL.RawQuery
+			}
+			if _, ok := req.Header["User-Agent"]; !ok {
+				req.Header.Set("User-Agent", "")
+			}
+
+			if m.Host != "" {
+				req.Host = m.Host
+			}
 		},
-		DisableKeepAlives:     m.DisableKeepAlives,
-		MaxIdleConns:          m.MaxIdleConns,
-		MaxIdleConnsPerHost:   m.MaxIdleConns,
-		IdleConnTimeout:       m.IdleConnTimeout,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		DisableCompression:    true,
-		ResponseHeaderTimeout: m.ResponseHeaderTimeout,
+		BufferPool: bytesPool,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: (&net.Dialer{
+				Timeout:   m.DialTimeout,
+				KeepAlive: m.TCPKeepAlive,
+				DualStack: true,
+			}).DialContext,
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: !m.VerifyCA,
+			},
+			DisableKeepAlives:     m.DisableKeepAlives,
+			MaxIdleConns:          m.MaxIdleConns,
+			MaxIdleConnsPerHost:   m.MaxIdleConns,
+			IdleConnTimeout:       m.IdleConnTimeout,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+			DisableCompression:    true,
+			ResponseHeaderTimeout: m.ResponseHeaderTimeout,
+		},
+		ErrorLog: m.ErrorLog,
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, "Bad Gateway", http.StatusBadGateway)
+		},
 	}
 
 	return r
+}
+
+func singleJoiningSlash(a, b string) string {
+	aslash := strings.HasSuffix(a, "/")
+	bslash := strings.HasPrefix(b, "/")
+	switch {
+	case aslash && bslash:
+		return a + b[1:]
+	case !aslash && !bslash:
+		return a + "/" + b
+	}
+	return a + b
 }
