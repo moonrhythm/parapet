@@ -29,7 +29,7 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	if m.DialTimeout == 0 {
-		m.DialTimeout = 30 * time.Second
+		m.DialTimeout = 5 * time.Second
 	}
 	if m.TCPKeepAlive == 0 {
 		m.TCPKeepAlive = 30 * time.Second

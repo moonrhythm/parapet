@@ -2,6 +2,8 @@ package parapet
 
 import (
 	"context"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,12 +23,20 @@ type Server struct {
 	ReadHeaderTimeout time.Duration
 	WriteTimeout      time.Duration
 	IdleTimeout       time.Duration
+	TCPKeepAlive      time.Duration
 	GraceTimeout      time.Duration
+	ErrorLog          *log.Logger
 }
 
-// New creates new server
+// New creates new server with default config
 func New() *Server {
-	return new(Server)
+	return &Server{
+		ReadTimeout:       time.Minute,
+		ReadHeaderTimeout: time.Minute,
+		IdleTimeout:       3 * time.Minute,
+		TCPKeepAlive:      3 * time.Minute,
+		GraceTimeout:      10 * time.Second,
+	}
 }
 
 // Use uses middleware
@@ -55,6 +65,7 @@ func (s *Server) configServer() {
 	s.s.ReadHeaderTimeout = s.ReadHeaderTimeout
 	s.s.WriteTimeout = s.WriteTimeout
 	s.s.IdleTimeout = s.IdleTimeout
+	s.s.ErrorLog = s.ErrorLog
 }
 
 func (s *Server) configHandler() {
@@ -65,16 +76,14 @@ func (s *Server) configHandler() {
 
 // ListenAndServe starts web server
 func (s *Server) ListenAndServe() error {
-	s.configServer()
-
 	if s.GraceTimeout <= 0 {
-		return s.s.ListenAndServe()
+		return s.listenAndServe()
 	}
 
 	errChan := make(chan error)
 
 	go func() {
-		if err := s.s.ListenAndServe(); err != http.ErrServerClosed {
+		if err := s.listenAndServe(); err != http.ErrServerClosed {
 			errChan <- err
 		}
 	}()
@@ -89,8 +98,32 @@ func (s *Server) ListenAndServe() error {
 	case err := <-errChan:
 		return err
 	case <-stop:
-		return s.s.Shutdown(ctx)
+		return s.Shutdown(ctx)
 	}
+}
+
+func (s *Server) listenAndServe() error {
+	addr := s.Addr
+	if addr == "" {
+		addr = ":http"
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return err
+	}
+
+	if s.TCPKeepAlive == 0 {
+		return s.Serve(ln)
+	}
+
+	return s.Serve(tcpKeepAliveListener{ln.(*net.TCPListener), s.TCPKeepAlive})
+}
+
+// Serve serves incoming connections
+func (s *Server) Serve(l net.Listener) error {
+	s.configServer()
+
+	return s.s.Serve(l)
 }
 
 // Shutdown shutdowns server
