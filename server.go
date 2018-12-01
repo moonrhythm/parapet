@@ -16,8 +16,12 @@ type Server struct {
 	once sync.Once
 	ms   Middlewares
 
-	Addr         string
-	GraceTimeout time.Duration
+	Addr              string
+	ReadTimeout       time.Duration
+	ReadHeaderTimeout time.Duration
+	WriteTimeout      time.Duration
+	IdleTimeout       time.Duration
+	GraceTimeout      time.Duration
 }
 
 // New creates new server
@@ -47,9 +51,10 @@ func (s *Server) configServer() {
 
 	s.s.Addr = s.Addr
 
-	if s.GraceTimeout == 0 {
-		s.GraceTimeout = 10 * time.Second
-	}
+	s.s.ReadTimeout = s.ReadTimeout
+	s.s.ReadHeaderTimeout = s.ReadHeaderTimeout
+	s.s.WriteTimeout = s.WriteTimeout
+	s.s.IdleTimeout = s.IdleTimeout
 }
 
 func (s *Server) configHandler() {
