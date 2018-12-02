@@ -8,6 +8,7 @@ Reverse Proxy and API Gateway Framework
 package main
 
 import (
+    "fmt"
     "log"
     "net/http"
     "time"
@@ -29,17 +30,20 @@ func main() {
     // start mock upstream server
     {
         go http.ListenAndServe(":8081", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            w.Write([]byte("server 1"))
+            fmt.Fprintf(w, "server 1\nProto: %s\n", r.Proto)
         }))
-        go http.ListenAndServe(":8082", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            w.Write([]byte("server 1 api"))
-        }))
+        b2 := parapet.NewBackend()
+        b2.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+            fmt.Fprintf(w, "server 1 api\nProto: %s\n", r.Proto)
+        })
+        b2.Addr = ":8082"
+        go b2.ListenAndServe()
         go http.ListenAndServe(":8083", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             time.Sleep(3 * time.Second)
             w.Write([]byte("server 2"))
         }))
         go http.ListenAndServeTLS(":8084", "server.crt", "server.key", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-            w.Write([]byte("server 2 api"))
+            fmt.Fprintf(w, "server 2 api\nProto: %s\n", r.Proto)
         }))
         go http.ListenAndServe(":8085", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
             w.Write([]byte("Not Found server"))
@@ -59,7 +63,7 @@ func main() {
         web1 := host.New("web1.local")
         r := router.New()
         r.Handle("/", &upstream.Upstream{Target: "http://127.0.0.1:8081", MaxIdleConns: 1000})
-        r.Handle("/api", &upstream.Upstream{Target: "http://127.0.0.1:8082"})
+        r.Handle("/api", &upstream.Upstream{Target: "h2c://127.0.0.1:8082", MaxIdleConns: 1000})
         web1.Use(r)
         s.Use(web1)
     }
