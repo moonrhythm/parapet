@@ -7,6 +7,11 @@ type Upstream struct {
 	Headers []Header
 }
 
+// NewUpstream creates new upstream middleware
+func NewUpstream(headerpairs ...string) *Upstream {
+	return &Upstream{Headers: buildHeaders(headerpairs)}
+}
+
 // ServeHandler implements middleware interface
 func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {

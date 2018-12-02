@@ -7,6 +7,11 @@ type Response struct {
 	Headers []string
 }
 
+// NewResponse creates new response middleware
+func NewResponse(headers ...string) *Response {
+	return &Response{Headers: headers}
+}
+
 // ServeHandler implements middleware interface
 func (m *Response) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {

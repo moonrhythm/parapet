@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -21,6 +22,14 @@ type Upstream struct {
 	ResponseHeaderTimeout time.Duration
 	VerifyCA              bool
 	ErrorLog              *log.Logger
+}
+
+func (m *Upstream) logf(format string, v ...interface{}) {
+	if m.ErrorLog == nil {
+		log.Printf(format, v...)
+		return
+	}
+	m.ErrorLog.Printf(format, v...)
 }
 
 // ServeHandler implements middleware interface
@@ -66,6 +75,12 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 		Transport:  m.newTransport(),
 		ErrorLog:   m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			if err == context.Canceled {
+				// client canceled request
+				return
+			}
+
+			m.logf("upstream: %v", err)
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
 	}
