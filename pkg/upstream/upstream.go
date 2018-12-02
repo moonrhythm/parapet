@@ -24,6 +24,13 @@ type Upstream struct {
 	ErrorLog              *log.Logger
 }
 
+// New creates new upstream with default config
+func New(target string) *Upstream {
+	return &Upstream{
+		Target: target,
+	}
+}
+
 func (m *Upstream) logf(format string, v ...interface{}) {
 	if m.ErrorLog == nil {
 		log.Printf(format, v...)
