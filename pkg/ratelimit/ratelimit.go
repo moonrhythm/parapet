@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -19,13 +20,15 @@ type RateLimit struct {
 
 	mu     sync.RWMutex
 	bucket *lru.Cache
+	timer  *time.Timer
+	last   time.Time
 }
 
 // New creates new default rate limiter
 func New(ratePerSecond int, trustProxy bool) *RateLimit {
 	m := &RateLimit{
 		Key: func(r *http.Request) string {
-			return r.RemoteAddr
+			return parseHost(r.RemoteAddr)
 		},
 		Rate:       ratePerSecond,
 		Unit:       time.Second,
@@ -35,7 +38,7 @@ func New(ratePerSecond int, trustProxy bool) *RateLimit {
 		m.Key = func(r *http.Request) string {
 			ip := r.Header.Get("X-Forwarded-For")
 			if ip == "" {
-				ip = r.RemoteAddr
+				ip = parseHost(r.RemoteAddr)
 			}
 			return ip
 		}
@@ -54,13 +57,36 @@ func (m *RateLimit) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	if m.ExceedHandler == nil {
+		delay := strconv.FormatInt(int64(m.Unit/time.Second), 10)
 		m.ExceedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Retry-After", delay)
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 		})
 	}
 
+	if m.timer == nil {
+		d := time.Minute
+		m.timer = time.NewTimer(d)
+		go func() {
+			for {
+				<-m.timer.C
+				m.timer.Reset(d)
+
+				m.mu.RLock()
+				shouldClear := time.Since(m.last) > m.Unit
+				m.mu.RUnlock()
+				if shouldClear {
+					m.mu.Lock()
+					m.bucket.Clear()
+					m.mu.Unlock()
+				}
+			}
+		}()
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		key := m.Key(r) + strconv.FormatInt(time.Now().UnixNano()/int64(m.Unit), 10)
+		now := time.Now()
+		key := m.Key(r) + strconv.FormatInt(now.UnixNano()/int64(m.Unit), 10)
 
 		m.mu.RLock()
 		currentInf, _ := m.bucket.Get(key)
@@ -73,9 +99,17 @@ func (m *RateLimit) ServeHandler(h http.Handler) http.Handler {
 		}
 
 		m.mu.Lock()
+		m.last = now
+		currentInf, _ = m.bucket.Get(key)
+		current, _ = currentInf.(int)
 		m.bucket.Add(key, current+1)
 		m.mu.Unlock()
 
 		h.ServeHTTP(w, r)
 	})
+}
+
+func parseHost(s string) string {
+	host, _, _ := net.SplitHostPort(s)
+	return host
 }
