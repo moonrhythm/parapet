@@ -10,6 +10,11 @@ type WWW struct {
 	StatusCode int
 }
 
+// NewWWW creates new www middleware
+func NewWWW() *WWW {
+	return &WWW{}
+}
+
 // ServeHandler implements middleware interface
 func (m *WWW) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {

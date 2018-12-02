@@ -10,6 +10,11 @@ type NonWWW struct {
 	StatusCode int
 }
 
+// NewNonWWW creates new non www middleware
+func NewNonWWW() *NonWWW {
+	return &NonWWW{}
+}
+
 // ServeHandler implements middleware interface
 func (m *NonWWW) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {

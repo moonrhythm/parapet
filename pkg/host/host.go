@@ -8,13 +8,13 @@ import (
 
 // Host middleware
 type Host struct {
-	Host string
-	ms   parapet.Middlewares
+	Hosts []string
+	ms    parapet.Middlewares
 }
 
 // New creates new host
-func New(host string) *Host {
-	return &Host{Host: host}
+func New(host ...string) *Host {
+	return &Host{Hosts: host}
 }
 
 // Use uses middleware
@@ -29,13 +29,19 @@ func (host *Host) Use(m parapet.Middleware) {
 func (host *Host) ServeHandler(h http.Handler) http.Handler {
 	next := host.ms.ServeHandler(http.NotFoundHandler())
 
+	// build host map
+	hostMap := make(map[string]bool)
+	for _, x := range host.Hosts {
+		hostMap[x] = true
+	}
+
 	// catch-all
-	if host.Host == "" || host.Host == "*" {
+	if len(host.Hosts) == 0 || hostMap["*"] {
 		return next
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != host.Host {
+		if !hostMap[r.Host] {
 			h.ServeHTTP(w, r)
 			return
 		}
