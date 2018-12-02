@@ -12,6 +12,13 @@ type ReqID struct {
 	Header     string
 }
 
+// New creates default req id middleware
+func New() *ReqID {
+	return &ReqID{
+		TrustProxy: true,
+	}
+}
+
 const defaultHeader = "X-Request-Id"
 
 // ServeHandler implements middleware interface
