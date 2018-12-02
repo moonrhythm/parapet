@@ -10,6 +10,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"golang.org/x/net/http2"
+	"golang.org/x/net/http2/h2c"
 )
 
 // Server is the parapet server
@@ -19,6 +22,7 @@ type Server struct {
 	ms   Middlewares
 
 	Addr              string
+	Handler           http.Handler
 	ReadTimeout       time.Duration
 	ReadHeaderTimeout time.Duration
 	WriteTimeout      time.Duration
@@ -36,6 +40,7 @@ func New() *Server {
 		IdleTimeout:       3 * time.Minute,
 		TCPKeepAlive:      3 * time.Minute,
 		GraceTimeout:      10 * time.Second,
+		Handler:           http.NotFoundHandler(),
 	}
 }
 
@@ -70,7 +75,8 @@ func (s *Server) configServer() {
 
 func (s *Server) configHandler() {
 	s.once.Do(func() {
-		s.s.Handler = s.ms.ServeHandler(http.NotFoundHandler())
+		h2s := &http2.Server{}
+		s.s.Handler = h2c.NewHandler(s.ms.ServeHandler(s.Handler), h2s)
 	})
 }
 

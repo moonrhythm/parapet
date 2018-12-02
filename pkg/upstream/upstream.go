@@ -36,13 +36,13 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 		m.DialTimeout = 5 * time.Second
 	}
 	if m.TCPKeepAlive == 0 {
-		m.TCPKeepAlive = 30 * time.Second
+		m.TCPKeepAlive = 10 * time.Minute
 	}
 	if m.MaxIdleConns == 0 {
 		m.MaxIdleConns = 100
 	}
 	if m.IdleConnTimeout == 0 {
-		m.IdleConnTimeout = 90 * time.Second
+		m.IdleConnTimeout = 10 * time.Minute
 	}
 
 	targetQuery := target.RawQuery
