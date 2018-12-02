@@ -1,9 +1,7 @@
 package upstream
 
 import (
-	"crypto/tls"
 	"log"
-	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -65,26 +63,8 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 			}
 		},
 		BufferPool: bytesPool,
-		Transport: &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
-				Timeout:   m.DialTimeout,
-				KeepAlive: m.TCPKeepAlive,
-				DualStack: true,
-			}).DialContext,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !m.VerifyCA,
-			},
-			DisableKeepAlives:     m.DisableKeepAlives,
-			MaxIdleConns:          m.MaxIdleConns,
-			MaxIdleConnsPerHost:   m.MaxIdleConns,
-			IdleConnTimeout:       m.IdleConnTimeout,
-			TLSHandshakeTimeout:   10 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
-			DisableCompression:    true,
-			ResponseHeaderTimeout: m.ResponseHeaderTimeout,
-		},
-		ErrorLog: m.ErrorLog,
+		Transport:  m.newTransport(),
+		ErrorLog:   m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
