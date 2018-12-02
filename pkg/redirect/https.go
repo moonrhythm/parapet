@@ -33,7 +33,18 @@ func (m *HTTPS) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if (m.TrustProxy && r.Header.Get(m.ForwardedProto) == "http") || r.TLS == nil {
+		proto := r.Header.Get(m.ForwardedProto)
+		if m.TrustProxy && proto != "" {
+			if proto == "http" {
+				rd(w, r)
+				return
+			}
+
+			h.ServeHTTP(w, r)
+			return
+		}
+
+		if r.TLS == nil {
 			rd(w, r)
 			return
 		}
