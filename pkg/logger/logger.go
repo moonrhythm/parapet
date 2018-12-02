@@ -67,6 +67,7 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 
 		ctx := r.Context()
 		ctx = context.WithValue(ctx, ctxKeyRecord{}, &d)
+		r = r.WithContext(ctx)
 		h.ServeHTTP(&nw, r)
 	})
 }
