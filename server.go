@@ -49,10 +49,7 @@ func (s *Server) Use(m Middleware) {
 	if s.s.Handler != nil {
 		panic("parapet: can not use after serve")
 	}
-	if m == nil {
-		return
-	}
-	s.ms = append(s.ms, m)
+	s.ms.Use(m)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
