@@ -39,25 +39,19 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 		panic(err)
 	}
 
-	if m.DialTimeout == 0 {
-		m.DialTimeout = 5 * time.Second
-	}
-	if m.TCPKeepAlive == 0 {
-		m.TCPKeepAlive = 10 * time.Minute
-	}
-	if m.MaxIdleConns == 0 {
-		m.MaxIdleConns = 100
-	}
-	if m.IdleConnTimeout == 0 {
-		m.IdleConnTimeout = 10 * time.Minute
-	}
-
 	targetQuery := target.RawQuery
 	r := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
-			req.URL.Host = target.Host
-			req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
+
+			switch target.Scheme {
+			case "unix":
+				req.URL.Host = "/" + target.Host + "/" + target.Path
+			default:
+				req.URL.Host = target.Host
+				req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
+			}
+
 			if targetQuery == "" || req.URL.RawQuery == "" {
 				req.URL.RawQuery = targetQuery + req.URL.RawQuery
 			} else {
@@ -72,7 +66,7 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 			}
 		},
 		BufferPool: bytesPool,
-		Transport:  m.newTransport(),
+		Transport:  m.transport(target.Scheme),
 		ErrorLog:   m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if err == context.Canceled {
