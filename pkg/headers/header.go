@@ -1,4 +1,4 @@
-package addheaders
+package headers
 
 // Header type
 type Header struct {

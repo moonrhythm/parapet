@@ -1,4 +1,4 @@
-package mapheader
+package headers
 
 import (
 	"net/http"
@@ -6,14 +6,14 @@ import (
 	"strings"
 )
 
-// Upstream maps a request's header value
-type Upstream struct {
+// MapRequest maps a request's header value
+type MapRequest struct {
 	Header    string
 	Extractor func(string) string
 }
 
 // ServeHandler implements middleware interface
-func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
+func (m *MapRequest) ServeHandler(h http.Handler) http.Handler {
 	if m.Header == "" || m.Extractor == nil {
 		return h
 	}
@@ -29,9 +29,9 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 	})
 }
 
-// GCPHLBImmediateIP extracts client ip from gcp hlb
-func GCPHLBImmediateIP(proxy int) *Upstream {
-	return &Upstream{
+// MapGCPHLBImmediateIP extracts client ip from gcp hlb
+func MapGCPHLBImmediateIP(proxy int) *MapRequest {
+	return &MapRequest{
 		Header: "X-Forwarded-For",
 		Extractor: func(s string) string {
 			xs := strings.Split(s, ", ")
