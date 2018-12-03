@@ -18,12 +18,13 @@ func New() *Server {
 // NewFrontend creates new frontend server default config
 func NewFrontend() *Server {
 	return &Server{
-		ReadTimeout:  time.Minute,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  75 * time.Second,
-		TCPKeepAlive: 75 * time.Second,
-		GraceTimeout: 30 * time.Second,
-		Handler:      http.NotFoundHandler(),
+		ReadTimeout:       time.Minute,
+		ReadHeaderTimeout: time.Minute,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       75 * time.Second,
+		TCPKeepAlive:      75 * time.Second,
+		GraceTimeout:      30 * time.Second,
+		Handler:           http.NotFoundHandler(),
 	}
 }
 
