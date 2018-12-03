@@ -32,18 +32,6 @@ type Server struct {
 	ErrorLog          *log.Logger
 }
 
-// New creates new server with default config
-func New() *Server {
-	return &Server{
-		ReadTimeout:       time.Minute,
-		ReadHeaderTimeout: time.Minute,
-		IdleTimeout:       3 * time.Minute,
-		TCPKeepAlive:      3 * time.Minute,
-		GraceTimeout:      10 * time.Second,
-		Handler:           http.NotFoundHandler(),
-	}
-}
-
 // Use uses middleware
 func (s *Server) Use(m Middleware) {
 	if s.s.Handler != nil {
