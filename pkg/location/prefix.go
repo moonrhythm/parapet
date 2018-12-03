@@ -7,19 +7,19 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
-// Prefix matchs location using prefix string
-type Prefix struct {
+// Prefix creates new prefix matcher
+func Prefix(pattern string) *PrefixMatcher {
+	return &PrefixMatcher{Pattern: pattern}
+}
+
+// PrefixMatcher matchs location using prefix string
+type PrefixMatcher struct {
 	Pattern string
 	ms      parapet.Middlewares
 }
 
-// NewPrefix creates new prefix matcher
-func NewPrefix(pattern string) *Prefix {
-	return &Prefix{Pattern: pattern}
-}
-
 // Use uses middleware
-func (l *Prefix) Use(m parapet.Middleware) {
+func (l *PrefixMatcher) Use(m parapet.Middleware) {
 	if m == nil {
 		return
 	}
@@ -27,7 +27,7 @@ func (l *Prefix) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (l *Prefix) ServeHandler(h http.Handler) http.Handler {
+func (l *PrefixMatcher) ServeHandler(h http.Handler) http.Handler {
 	next := l.ms.ServeHandler(http.NotFoundHandler())
 
 	// catch-all

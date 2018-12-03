@@ -2,18 +2,18 @@ package headers
 
 import "net/http"
 
-// DelRequest deletes request headers
-type DelRequest struct {
+// DeleteRequest creates new request deleter
+func DeleteRequest(headers ...string) *RequestDeleter {
+	return &RequestDeleter{Headers: headers}
+}
+
+// RequestDeleter deletes request headers
+type RequestDeleter struct {
 	Headers []string
 }
 
-// NewDelRequest creates new delete request header middleware
-func NewDelRequest(headers ...string) *DelRequest {
-	return &DelRequest{Headers: headers}
-}
-
 // ServeHandler implements middleware interface
-func (m *DelRequest) ServeHandler(h http.Handler) http.Handler {
+func (m *RequestDeleter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}
@@ -27,37 +27,37 @@ func (m *DelRequest) ServeHandler(h http.Handler) http.Handler {
 	})
 }
 
-// DelResponse deletes response headers
-type DelResponse struct {
+// DeleteResponse creates new response deleter
+func DeleteResponse(headers ...string) *ResponseDeleter {
+	return &ResponseDeleter{Headers: headers}
+}
+
+// ResponseDeleter deletes response headers
+type ResponseDeleter struct {
 	Headers []string
 }
 
-// NewDelResponse creates new delete response header middleware
-func NewDelResponse(headers ...string) *DelResponse {
-	return &DelResponse{Headers: headers}
-}
-
 // ServeHandler implements middleware interface
-func (m *DelResponse) ServeHandler(h http.Handler) http.Handler {
+func (m *ResponseDeleter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ServeHTTP(&delResponseRW{
+		h.ServeHTTP(&responseDeleterRW{
 			ResponseWriter: w,
 			hide:           m.Headers,
 		}, r)
 	})
 }
 
-type delResponseRW struct {
+type responseDeleterRW struct {
 	http.ResponseWriter
 	hide        []string
 	wroteHeader bool
 }
 
-func (w *delResponseRW) WriteHeader(statusCode int) {
+func (w *responseDeleterRW) WriteHeader(statusCode int) {
 	if w.wroteHeader {
 		return
 	}
@@ -68,7 +68,7 @@ func (w *delResponseRW) WriteHeader(statusCode int) {
 	w.ResponseWriter.WriteHeader(statusCode)
 }
 
-func (w *delResponseRW) Write(p []byte) (int, error) {
+func (w *responseDeleterRW) Write(p []byte) (int, error) {
 	if !w.wroteHeader {
 		w.WriteHeader(http.StatusOK)
 	}

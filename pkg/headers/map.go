@@ -6,34 +6,19 @@ import (
 	"strings"
 )
 
-// MapRequest maps a request's header value
-type MapRequest struct {
-	Header    string
-	Extractor func(string) string
-}
-
-// ServeHandler implements middleware interface
-func (m *MapRequest) ServeHandler(h http.Handler) http.Handler {
-	if m.Header == "" || m.Extractor == nil {
-		return h
+// MapRequest creates new request mapper
+func MapRequest(header string, mapper func(string) string) *RequestMapper {
+	return &RequestMapper{
+		Header: header,
+		Mapper: mapper,
 	}
-
-	key := textproto.CanonicalMIMEHeaderKey(m.Header)
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for i, v := range r.Header[key] {
-			r.Header[key][i] = m.Extractor(v)
-		}
-
-		h.ServeHTTP(w, r)
-	})
 }
 
 // MapGCPHLBImmediateIP extracts client ip from gcp hlb
-func MapGCPHLBImmediateIP(proxy int) *MapRequest {
-	return &MapRequest{
+func MapGCPHLBImmediateIP(proxy int) *RequestMapper {
+	return &RequestMapper{
 		Header: "X-Forwarded-For",
-		Extractor: func(s string) string {
+		Mapper: func(s string) string {
 			xs := strings.Split(s, ", ")
 			if len(xs) < 2+proxy {
 				return s
@@ -41,4 +26,27 @@ func MapGCPHLBImmediateIP(proxy int) *MapRequest {
 			return xs[len(xs)-2-proxy]
 		},
 	}
+}
+
+// RequestMapper maps a request's header value
+type RequestMapper struct {
+	Header string
+	Mapper func(string) string
+}
+
+// ServeHandler implements middleware interface
+func (m *RequestMapper) ServeHandler(h http.Handler) http.Handler {
+	if m.Header == "" || m.Mapper == nil {
+		return h
+	}
+
+	key := textproto.CanonicalMIMEHeaderKey(m.Header)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for i, v := range r.Header[key] {
+			r.Header[key][i] = m.Mapper(v)
+		}
+
+		h.ServeHTTP(w, r)
+	})
 }

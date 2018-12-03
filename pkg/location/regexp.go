@@ -7,19 +7,19 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
-// RegExp matchs location using regexp
-type RegExp struct {
+// RegExp creates new RegExp matcher
+func RegExp(pattern string) *RegExpMatcher {
+	return &RegExpMatcher{Pattern: pattern}
+}
+
+// RegExpMatcher matchs location using regexp
+type RegExpMatcher struct {
 	Pattern string
 	ms      parapet.Middlewares
 }
 
-// NewRegExp creates new RegExp matcher
-func NewRegExp(pattern string) *RegExp {
-	return &RegExp{Pattern: pattern}
-}
-
 // Use uses middleware
-func (l *RegExp) Use(m parapet.Middleware) {
+func (l *RegExpMatcher) Use(m parapet.Middleware) {
 	if m == nil {
 		return
 	}
@@ -27,7 +27,7 @@ func (l *RegExp) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (l *RegExp) ServeHandler(h http.Handler) http.Handler {
+func (l *RegExpMatcher) ServeHandler(h http.Handler) http.Handler {
 	next := l.ms.ServeHandler(http.NotFoundHandler())
 
 	// catch-all

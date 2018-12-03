@@ -2,18 +2,18 @@ package headers
 
 import "net/http"
 
-// SetRequest sets request headers
-type SetRequest struct {
+// SetRequest creates new request setter
+func SetRequest(headerpairs ...string) *RequestSetter {
+	return &RequestSetter{Headers: buildHeaders(headerpairs)}
+}
+
+// RequestSetter sets request headers
+type RequestSetter struct {
 	Headers []Header
 }
 
-// NewSetRequest creates new set request header middleware
-func NewSetRequest(headerpairs ...string) *SetRequest {
-	return &SetRequest{Headers: buildHeaders(headerpairs)}
-}
-
 // ServeHandler implements middleware interface
-func (m *SetRequest) ServeHandler(h http.Handler) http.Handler {
+func (m *RequestSetter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}
@@ -27,18 +27,18 @@ func (m *SetRequest) ServeHandler(h http.Handler) http.Handler {
 	})
 }
 
-// SetResponse sets response headers
-type SetResponse struct {
+// SetResponse creates new response setter
+func SetResponse(headerpairs ...string) *ResponseSetter {
+	return &ResponseSetter{Headers: buildHeaders(headerpairs)}
+}
+
+// ResponseSetter sets response headers
+type ResponseSetter struct {
 	Headers []Header
 }
 
-// NewSetResponse creates new add response header middleware
-func NewSetResponse(headerpairs ...string) *SetResponse {
-	return &SetResponse{Headers: buildHeaders(headerpairs)}
-}
-
 // ServeHandler implements middleware interface
-func (m *SetResponse) ServeHandler(h http.Handler) http.Handler {
+func (m *ResponseSetter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}

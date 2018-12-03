@@ -19,10 +19,17 @@ type Logger struct {
 	ForwardedProto string
 }
 
-// Stdout creates new logger with default config write to stdout
+// Stdout creates new stdout logger
 func Stdout() *Logger {
 	return &Logger{
 		Writer: os.Stdout,
+	}
+}
+
+// Stderr creates new stderr logger
+func Stderr() *Logger {
+	return &Logger{
+		Writer: os.Stderr,
 	}
 }
 
