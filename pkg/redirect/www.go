@@ -10,9 +10,11 @@ type WWW struct {
 	StatusCode int
 }
 
-// NewWWW creates new www middleware
-func NewWWW() *WWW {
-	return &WWW{}
+// WWWPermanent creates new www middleware using 301
+func WWWPermanent() *WWW {
+	return &WWW{
+		StatusCode: http.StatusMovedPermanently,
+	}
 }
 
 // ServeHandler implements middleware interface

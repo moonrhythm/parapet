@@ -10,9 +10,11 @@ type NonWWW struct {
 	StatusCode int
 }
 
-// NewNonWWW creates new non www middleware
-func NewNonWWW() *NonWWW {
-	return &NonWWW{}
+// NonWWWPermanent creates new non www middleware with 301
+func NonWWWPermanent() *NonWWW {
+	return &NonWWW{
+		StatusCode: http.StatusMovedPermanently,
+	}
 }
 
 // ServeHandler implements middleware interface
