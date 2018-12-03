@@ -19,6 +19,13 @@ type Logger struct {
 	ForwardedProto string
 }
 
+// Stdout creates new logger with default config write to stdout
+func Stdout() *Logger {
+	return &Logger{
+		Writer: os.Stdout,
+	}
+}
+
 // ServeHandler implements middleware interface
 func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 	if m.Writer == nil {

@@ -38,18 +38,18 @@ func New(rate int, unit time.Duration, trustProxy bool) *RateLimit {
 	return m
 }
 
-// NewPerSecond creates new rate limiter per second
-func NewPerSecond(rate int, trustProxy bool) *RateLimit {
+// PerSecond creates new rate limiter per second
+func PerSecond(rate int, trustProxy bool) *RateLimit {
 	return New(rate, time.Second, trustProxy)
 }
 
-// NewPerMinute creates new rate limiter per minute
-func NewPerMinute(rate int, trustProxy bool) *RateLimit {
+// PerMinute creates new rate limiter per minute
+func PerMinute(rate int, trustProxy bool) *RateLimit {
 	return New(rate, time.Minute, trustProxy)
 }
 
-// NewPerHour creates new rate limiter per hour
-func NewPerHour(rate int, trustProxy bool) *RateLimit {
+// PerHour creates new rate limiter per hour
+func PerHour(rate int, trustProxy bool) *RateLimit {
 	return New(rate, time.Hour, trustProxy)
 }
 
