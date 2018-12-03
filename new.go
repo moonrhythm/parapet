@@ -33,5 +33,6 @@ func NewBackend() *Server {
 		IdleTimeout:  10*time.Minute + 20*time.Second,
 		TCPKeepAlive: 10*time.Minute + 20*time.Second,
 		GraceTimeout: 30 * time.Second,
+		Handler:      http.NotFoundHandler(),
 	}
 }
