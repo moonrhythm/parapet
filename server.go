@@ -91,16 +91,18 @@ func (s *Server) ListenAndServe() error {
 		}
 	}()
 
-	stop := make(chan os.Signal, 2)
-	signal.Notify(stop, syscall.SIGTERM, os.Interrupt)
-
-	ctx, cancel := context.WithTimeout(context.Background(), s.GraceTimeout)
-	defer cancel()
+	shutdown := make(chan os.Signal, 1)
+	signal.Notify(shutdown, syscall.SIGTERM)
 
 	select {
 	case err := <-errChan:
 		return err
-	case <-stop:
+	case <-shutdown:
+		// wait for service to deregistered
+		time.Sleep(5 * time.Second)
+
+		ctx, cancel := context.WithTimeout(context.Background(), s.GraceTimeout)
+		defer cancel()
 		return s.Shutdown(ctx)
 	}
 }
