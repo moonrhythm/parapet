@@ -11,8 +11,8 @@ type HTTPS struct {
 	ForwardedProto string
 }
 
-// HTTPSDefault creates new default https middleware
-func HTTPSDefault() *HTTPS {
+// HTTPSPermanent creates new https middleware with 301
+func HTTPSPermanent() *HTTPS {
 	return &HTTPS{
 		TrustProxy: true,
 		StatusCode: http.StatusMovedPermanently,
