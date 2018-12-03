@@ -60,9 +60,13 @@ func (m *RateLimit) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	if m.ExceedHandler == nil {
-		delay := strconv.FormatInt(int64(m.Unit/time.Second), 10)
 		m.ExceedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Retry-After", delay)
+			now := time.Now()
+			after := (now.Truncate(m.Unit).UnixNano() + int64(m.Unit) - now.UnixNano()) / int64(time.Second)
+			if after <= 0 {
+				after = 1
+			}
+			w.Header().Set("Retry-After", strconv.FormatInt(after, 10))
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 		})
 	}
