@@ -43,7 +43,6 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 		// case 2: chunked transfer encoding, unknown content length
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
-		r = r.WithContext(ctx)
 		body := r.Body
 
 		k := m.Size
@@ -55,9 +54,10 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 					// already send 100 Continue, need to read all request's body
 					// or TCP will conflict
 					b := pool.Get()
-					io.CopyBuffer(ioutil.Discard, body, b)
+					read, _ := io.CopyBuffer(ioutil.Discard, body, b)
 					pool.Put(b)
 
+					r.ContentLength = m.Size + read // update content length for logger
 					m.LimitedHandler.ServeHTTP(w, r)
 
 					cancel() // prevent upstream send body to client
@@ -65,7 +65,7 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 				}
 
 				if int64(len(p)) > k {
-					p = p[0:k]
+					p = p[:k]
 				}
 				n, err = body.Read(p)
 				k -= int64(n)
@@ -74,7 +74,7 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 			Closer: body,
 		}
 
-		h.ServeHTTP(w, r)
+		h.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

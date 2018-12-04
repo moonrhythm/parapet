@@ -48,11 +48,6 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 		d.URI = r.RequestURI
 		d.UserAgent = r.UserAgent()
 		d.Referer = r.Referer()
-		d.RemoteIP, _, _ = net.SplitHostPort(r.RemoteAddr)
-		d.RealIP = r.Header.Get("X-Forwarded-For")
-		d.Proto = r.Header.Get("X-Forwarded-Proto")
-		d.ContentLength = r.ContentLength
-		d.RequestID = r.Header.Get(m.RequestID)
 
 		start := time.Now()
 		nw := responseWriter{ResponseWriter: w}
@@ -63,6 +58,11 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 
 			duration := time.Since(start)
 			d.Date = start.Format(time.RFC3339)
+			d.RemoteIP, _, _ = net.SplitHostPort(r.RemoteAddr)
+			d.ContentLength = r.ContentLength
+			d.RealIP = r.Header.Get("X-Forwarded-For")
+			d.Proto = r.Header.Get("X-Forwarded-Proto")
+			d.RequestID = r.Header.Get(m.RequestID)
 			d.Duration = duration.Nanoseconds()
 			d.DurationHuman = duration.String()
 			d.StatusCode = nw.statusCode
