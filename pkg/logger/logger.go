@@ -49,8 +49,8 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 		d.UserAgent = r.UserAgent()
 		d.Referer = r.Referer()
 		d.RemoteIP, _, _ = net.SplitHostPort(r.RemoteAddr)
-		d.ForwardedFor = r.Header.Get("X-Forwarded-For")
-		d.ForwardedProto = r.Header.Get("X-Forwarded-Proto")
+		d.RealIP = r.Header.Get("X-Forwarded-For")
+		d.Proto = r.Header.Get("X-Forwarded-Proto")
 		d.ContentLength = r.ContentLength
 		d.RequestID = r.Header.Get(m.RequestID)
 

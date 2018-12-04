@@ -14,8 +14,8 @@ type record struct {
 	UserAgent         string `json:"user_agent,omitempty"`
 	Referer           string `json:"referer,omitempty"`
 	RemoteIP          string `json:"remote_ip"`
-	ForwardedFor      string `json:"forwarded_for,omitempty"`
-	ForwardedProto    string `json:"forwarded_proto,omitempty"`
+	RealIP            string `json:"real_ip"`
+	Proto             string `json:"proto"`
 	Duration          int64  `json:"duration"`
 	DurationHuman     string `json:"duration_human"`
 	ContentLength     int64  `json:"content_length,omitempty"`
