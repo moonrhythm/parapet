@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/moonrhythm/parapet/pkg/logger"
 )
 
 // Upstream middleware
@@ -47,7 +49,7 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	targetQuery := target.RawQuery
-	r := &httputil.ReverseProxy{
+	p := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 
@@ -86,7 +88,11 @@ func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
 		},
 	}
 
-	return r
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger.Set(r.Context(), "upstream", m.Target)
+
+		p.ServeHTTP(w, r)
+	})
 }
 
 func singleJoiningSlash(a, b string) string {

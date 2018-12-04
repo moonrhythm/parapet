@@ -33,7 +33,7 @@ func (m *Upstream) transport(scheme string) *http.Transport {
 		}
 	}
 	if m.DialTimeout == 0 {
-		m.DialTimeout = 5 * time.Second
+		m.DialTimeout = 3 * time.Second
 	}
 
 	d := &net.Dialer{

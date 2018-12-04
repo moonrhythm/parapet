@@ -6,25 +6,30 @@ type ctxKeyRecord struct{}
 
 type record struct {
 	disable bool
+	data    map[string]interface{}
+}
 
-	Date              string `json:"date"`
-	Method            string `json:"method"`
-	Host              string `json:"host"`
-	URI               string `json:"uri"`
-	UserAgent         string `json:"user_agent,omitempty"`
-	Referer           string `json:"referer,omitempty"`
-	RemoteIP          string `json:"remote_ip"`
-	RealIP            string `json:"real_ip"`
-	Proto             string `json:"proto"`
-	Duration          int64  `json:"duration"`
-	DurationHuman     string `json:"duration_human"`
-	ContentLength     int64  `json:"content_length,omitempty"`
-	StatusCode        int    `json:"status_code"`
-	ResponseBodyBytes int64  `json:"response_body_bytes,omitempty"`
-	RequestID         string `json:"request_id,omitempty"`
+func newRecord() *record {
+	return &record{data: make(map[string]interface{})}
+}
+
+func (r *record) Set(name string, value interface{}) {
+	if value == "" || value == 0 {
+		return
+	}
+	r.data[name] = value
 }
 
 func getRecord(ctx context.Context) *record {
 	d, _ := ctx.Value(ctxKeyRecord{}).(*record)
 	return d
+}
+
+// Set sets log record field
+func Set(ctx context.Context, name string, value interface{}) {
+	r := getRecord(ctx)
+	if r == nil {
+		return
+	}
+	r.Set(name, value)
 }

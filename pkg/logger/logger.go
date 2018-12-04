@@ -42,14 +42,21 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var d record
-		d.Method = r.Method
-		d.Host = r.Host
-		d.URI = r.RequestURI
-		d.UserAgent = r.UserAgent()
-		d.Referer = r.Referer()
-
 		start := time.Now()
+
+		d := newRecord()
+		d.Set("date", start.Format(time.RFC3339))
+		d.Set("method", r.Method)
+		d.Set("host", r.Host)
+		d.Set("uri", r.RequestURI)
+		d.Set("user_agent", r.UserAgent())
+		d.Set("referer", r.Referer())
+		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+		d.Set("remote_ip", remoteIP)
+		d.Set("content_length", r.ContentLength)
+		d.Set("real_ip", r.Header.Get("X-Forwarded-For"))
+		d.Set("proto", r.Header.Get("X-Forwarded-Proto"))
+
 		nw := responseWriter{ResponseWriter: w}
 		defer func() {
 			if d.disable {
@@ -57,22 +64,16 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 			}
 
 			duration := time.Since(start)
-			d.Date = start.Format(time.RFC3339)
-			d.RemoteIP, _, _ = net.SplitHostPort(r.RemoteAddr)
-			d.ContentLength = r.ContentLength
-			d.RealIP = r.Header.Get("X-Forwarded-For")
-			d.Proto = r.Header.Get("X-Forwarded-Proto")
-			d.RequestID = r.Header.Get(m.RequestID)
-			d.Duration = duration.Nanoseconds()
-			d.DurationHuman = duration.String()
-			d.StatusCode = nw.statusCode
-			d.ResponseBodyBytes = nw.length
+			d.Set("duration", duration.Nanoseconds())
+			d.Set("duration_human", duration.String())
+			d.Set("status_code", nw.statusCode)
+			d.Set("response_body_bytes", nw.length)
 
-			json.NewEncoder(m.Writer).Encode(&d)
+			json.NewEncoder(m.Writer).Encode(d.data)
 		}()
 
 		ctx := r.Context()
-		ctx = context.WithValue(ctx, ctxKeyRecord{}, &d)
+		ctx = context.WithValue(ctx, ctxKeyRecord{}, d)
 		r = r.WithContext(ctx)
 		h.ServeHTTP(&nw, r)
 	})

@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gofrs/uuid"
+
+	"github.com/moonrhythm/parapet/pkg/logger"
 )
 
 // ReqID middleware
@@ -32,6 +34,7 @@ func (m *ReqID) ServeHandler(h http.Handler) http.Handler {
 			r.Header.Set(m.Header, id)
 		}
 		w.Header().Set(m.Header, id)
+		logger.Set(r.Context(), "request_id", id)
 
 		h.ServeHTTP(w, r)
 	})

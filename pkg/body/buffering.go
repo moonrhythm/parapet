@@ -2,6 +2,7 @@ package body
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"io/ioutil"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"os"
 
 	"github.com/moonrhythm/parapet/pkg/internal/pool"
+	"github.com/moonrhythm/parapet/pkg/logger"
 )
 
 // BufferRequest creates new request bufferer
@@ -72,8 +74,13 @@ func (m *RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 			r.ContentLength, _ = fp.Seek(0, os.SEEK_CUR)
 			r.TransferEncoding = []string{} // change to identity encoding
 			r.Body = fp
+			logger.Set(r.Context(), "content_length", r.ContentLength)
 
 			fp.Seek(0, os.SEEK_SET)
+		}
+
+		if r.Context().Err() == context.Canceled {
+			return
 		}
 
 		h.ServeHTTP(w, r)
