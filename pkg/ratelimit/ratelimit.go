@@ -8,10 +8,10 @@ import (
 
 // RateLimit middleware
 type RateLimit struct {
-	Key           func(r *http.Request) string
-	Rate          int
-	Unit          time.Duration
-	ExceedHandler http.Handler
+	Key             func(r *http.Request) string
+	Rate            int
+	Unit            time.Duration
+	ExceededHandler http.Handler
 
 	bucket bucket
 }
@@ -49,8 +49,8 @@ func (m *RateLimit) ServeHandler(h http.Handler) http.Handler {
 		return h
 	}
 
-	if m.ExceedHandler == nil {
-		m.ExceedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if m.ExceededHandler == nil {
+		m.ExceededHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			now := time.Now()
 			after := (now.Truncate(m.Unit).UnixNano() + int64(m.Unit) - now.UnixNano()) / int64(time.Second)
 			if after <= 0 {
@@ -67,7 +67,7 @@ func (m *RateLimit) ServeHandler(h http.Handler) http.Handler {
 
 		current := m.bucket.Incr(t, key, m.Rate)
 		if current > m.Rate {
-			m.ExceedHandler.ServeHTTP(w, r)
+			m.ExceededHandler.ServeHTTP(w, r)
 			return
 		}
 

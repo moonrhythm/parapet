@@ -16,8 +16,8 @@ func LimitRequest(size int64) *RequestLimiter {
 
 // RequestLimiter limits request body size
 type RequestLimiter struct {
-	Size    int64
-	Handler http.Handler
+	Size           int64
+	LimitedHandler http.Handler
 }
 
 // ServeHandler implements middleware interface
@@ -27,8 +27,8 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 		return h
 	}
 
-	if m.Handler == nil {
-		m.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if m.LimitedHandler == nil {
+		m.LimitedHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Request Entity Too Large", http.StatusRequestEntityTooLarge)
 		})
 	}
@@ -36,7 +36,7 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// case 1: content length
 		if r.ContentLength != -1 && r.ContentLength > m.Size {
-			m.Handler.ServeHTTP(w, r)
+			m.LimitedHandler.ServeHTTP(w, r)
 			return
 		}
 
@@ -58,7 +58,7 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 					io.CopyBuffer(ioutil.Discard, body, b)
 					pool.Put(b)
 
-					m.Handler.ServeHTTP(w, r)
+					m.LimitedHandler.ServeHTTP(w, r)
 
 					cancel() // prevent upstream to send body to client
 					return
