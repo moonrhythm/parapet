@@ -19,12 +19,10 @@ func New() *ReqID {
 	}
 }
 
-const defaultHeader = "X-Request-Id"
-
 // ServeHandler implements middleware interface
 func (m *ReqID) ServeHandler(h http.Handler) http.Handler {
 	if m.Header == "" {
-		m.Header = defaultHeader
+		m.Header = "X-Request-Id"
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
