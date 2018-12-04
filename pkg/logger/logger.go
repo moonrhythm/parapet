@@ -14,9 +14,7 @@ import (
 type Logger struct {
 	Writer io.Writer
 
-	RequestID      string
-	ForwardedFor   string
-	ForwardedProto string
+	RequestID string
 }
 
 // Stdout creates new stdout logger
@@ -42,12 +40,6 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 	if m.RequestID == "" {
 		m.RequestID = "X-Request-Id"
 	}
-	if m.ForwardedFor == "" {
-		m.ForwardedFor = "X-Forwarded-For"
-	}
-	if m.ForwardedProto == "" {
-		m.ForwardedProto = "X-Forwarded-Proto"
-	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var d record
@@ -57,8 +49,8 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 		d.UserAgent = r.UserAgent()
 		d.Referer = r.Referer()
 		d.RemoteIP, _, _ = net.SplitHostPort(r.RemoteAddr)
-		d.ForwardedFor = r.Header.Get(m.ForwardedFor)
-		d.ForwardedProto = r.Header.Get(m.ForwardedProto)
+		d.ForwardedFor = r.Header.Get("X-Forwarded-For")
+		d.ForwardedProto = r.Header.Get("X-Forwarded-Proto")
 		d.ContentLength = r.ContentLength
 		d.RequestID = r.Header.Get(m.RequestID)
 

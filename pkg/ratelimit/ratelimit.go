@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -18,39 +17,30 @@ type RateLimit struct {
 }
 
 // New creates new rate limiter with default config
-func New(rate int, unit time.Duration, trustProxy bool) *RateLimit {
+func New(rate int, unit time.Duration) *RateLimit {
 	m := &RateLimit{
 		Key: func(r *http.Request) string {
-			return parseHost(r.RemoteAddr)
+			return r.Header.Get("X-Forwarded-For")
 		},
 		Rate: rate,
 		Unit: unit,
-	}
-	if trustProxy {
-		m.Key = func(r *http.Request) string {
-			ip := r.Header.Get("X-Forwarded-For")
-			if ip == "" {
-				ip = parseHost(r.RemoteAddr)
-			}
-			return ip
-		}
 	}
 	return m
 }
 
 // PerSecond creates new rate limiter per second
-func PerSecond(rate int, trustProxy bool) *RateLimit {
-	return New(rate, time.Second, trustProxy)
+func PerSecond(rate int) *RateLimit {
+	return New(rate, time.Second)
 }
 
 // PerMinute creates new rate limiter per minute
-func PerMinute(rate int, trustProxy bool) *RateLimit {
-	return New(rate, time.Minute, trustProxy)
+func PerMinute(rate int) *RateLimit {
+	return New(rate, time.Minute)
 }
 
 // PerHour creates new rate limiter per hour
-func PerHour(rate int, trustProxy bool) *RateLimit {
-	return New(rate, time.Hour, trustProxy)
+func PerHour(rate int) *RateLimit {
+	return New(rate, time.Hour)
 }
 
 // ServeHandler implements middleware interface
@@ -83,9 +73,4 @@ func (m *RateLimit) ServeHandler(h http.Handler) http.Handler {
 
 		h.ServeHTTP(w, r)
 	})
-}
-
-func parseHost(s string) string {
-	host, _, _ := net.SplitHostPort(s)
-	return host
 }

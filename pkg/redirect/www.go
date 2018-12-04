@@ -25,7 +25,8 @@ func (m *WWWRedirector) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.Host, "www.") {
-			http.Redirect(w, r, scheme(r)+"://www."+r.Host+r.RequestURI, m.StatusCode)
+			proto := r.Header.Get("X-Forwarded-Proto")
+			http.Redirect(w, r, proto+"://www."+r.Host+r.RequestURI, m.StatusCode)
 			return
 		}
 		h.ServeHTTP(w, r)
