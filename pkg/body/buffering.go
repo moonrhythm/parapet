@@ -32,7 +32,7 @@ func (m *RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 			b := pool.Get()
 			defer pool.Put(b)
 
-			n, err := r.Body.Read(b)
+			n, err := io.ReadAtLeast(r.Body, b, int(r.ContentLength))
 			if err == io.EOF {
 				err = nil
 			}
