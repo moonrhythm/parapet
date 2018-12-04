@@ -35,7 +35,7 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// case 1: content length
-		if r.ContentLength != -1 && r.ContentLength > m.Size {
+		if r.ContentLength > m.Size {
 			m.LimitedHandler.ServeHTTP(w, r)
 			return
 		}
