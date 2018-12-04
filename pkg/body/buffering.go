@@ -68,8 +68,12 @@ func (m *RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 				return
 			}
 			r.Body.Close()
-			fp.Seek(0, os.SEEK_SET)
+
+			r.ContentLength, _ = fp.Seek(0, os.SEEK_CUR)
+			r.TransferEncoding = []string{} // change to identity encoding
 			r.Body = fp
+
+			fp.Seek(0, os.SEEK_SET)
 		}
 
 		h.ServeHTTP(w, r)
