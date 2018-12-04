@@ -60,7 +60,7 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 
 					m.LimitedHandler.ServeHTTP(w, r)
 
-					cancel() // prevent upstream to send body to client
+					cancel() // prevent upstream send body to client
 					return
 				}
 
