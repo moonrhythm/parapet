@@ -5,29 +5,21 @@ import (
 )
 
 // To redirects to target
-type To struct {
+func To(target string, statusCode int) *Redirector {
+	return &Redirector{
+		Target:     target,
+		StatusCode: statusCode,
+	}
+}
+
+// Redirector redirects to target
+type Redirector struct {
 	Target     string
 	StatusCode int
 }
 
-// ToPermanent redirects to target using 301
-func ToPermanent(target string) *To {
-	return &To{
-		Target:     target,
-		StatusCode: http.StatusMovedPermanently,
-	}
-}
-
-// ToFound redirects to target using 302
-func ToFound(target string) *To {
-	return &To{
-		Target:     target,
-		StatusCode: http.StatusFound,
-	}
-}
-
 // ServeHandler implements middleware interface
-func (m *To) ServeHandler(h http.Handler) http.Handler {
+func (m *Redirector) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}

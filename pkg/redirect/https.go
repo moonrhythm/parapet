@@ -4,23 +4,23 @@ import (
 	"net/http"
 )
 
-// HTTPS redirects to https
-type HTTPS struct {
-	TrustProxy     bool
-	StatusCode     int
-	ForwardedProto string
-}
-
-// HTTPSPermanent creates new https middleware with 301
-func HTTPSPermanent() *HTTPS {
-	return &HTTPS{
+// HTTPS creates new https redirector
+func HTTPS() *HTTPSRedirector {
+	return &HTTPSRedirector{
 		TrustProxy: true,
 		StatusCode: http.StatusMovedPermanently,
 	}
 }
 
+// HTTPSRedirector redirects to https
+type HTTPSRedirector struct {
+	TrustProxy     bool
+	StatusCode     int
+	ForwardedProto string
+}
+
 // ServeHandler implements middleware interface
-func (m *HTTPS) ServeHandler(h http.Handler) http.Handler {
+func (m *HTTPSRedirector) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}

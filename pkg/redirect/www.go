@@ -5,20 +5,20 @@ import (
 	"strings"
 )
 
-// WWW redirects to www
-type WWW struct {
-	StatusCode int
-}
-
-// WWWPermanent creates new www middleware using 301
-func WWWPermanent() *WWW {
-	return &WWW{
+// WWW creates new www redirector
+func WWW() *WWWRedirector {
+	return &WWWRedirector{
 		StatusCode: http.StatusMovedPermanently,
 	}
 }
 
+// WWWRedirector redirects to www
+type WWWRedirector struct {
+	StatusCode int
+}
+
 // ServeHandler implements middleware interface
-func (m *WWW) ServeHandler(h http.Handler) http.Handler {
+func (m *WWWRedirector) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}
