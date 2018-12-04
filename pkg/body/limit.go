@@ -3,10 +3,7 @@ package body
 import (
 	"context"
 	"io"
-	"io/ioutil"
 	"net/http"
-
-	"github.com/moonrhythm/parapet/pkg/internal/pool"
 )
 
 // LimitRequest creates new request limiter
@@ -51,13 +48,6 @@ func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 				if k <= 0 {
 					err = io.EOF
 
-					// already send 100 Continue, need to read all request's body
-					// or TCP will conflict
-					b := pool.Get()
-					read, _ := io.CopyBuffer(ioutil.Discard, body, b)
-					pool.Put(b)
-
-					r.ContentLength = m.Size + read // update content length for logger
 					m.LimitedHandler.ServeHTTP(w, r)
 
 					cancel() // prevent upstream send body to client
