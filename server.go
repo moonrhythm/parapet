@@ -30,6 +30,8 @@ type Server struct {
 	TCPKeepAlive      time.Duration
 	GraceTimeout      time.Duration
 	ErrorLog          *log.Logger
+	TrustProxy        bool
+	EnableH2C         bool
 }
 
 // Use uses middleware
@@ -60,8 +62,13 @@ func (s *Server) configServer() {
 
 func (s *Server) configHandler() {
 	s.once.Do(func() {
-		h2s := &http2.Server{}
-		s.s.Handler = h2c.NewHandler(s.ms.ServeHandler(s.Handler), h2s)
+		h := s.ms.ServeHandler(s.Handler)
+		h = trustProxy{s.TrustProxy}.ServeHandler(h)
+		if s.EnableH2C {
+			h2s := &http2.Server{}
+			h = h2c.NewHandler(h, h2s)
+		}
+		s.s.Handler = h
 	})
 }
 
