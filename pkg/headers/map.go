@@ -79,10 +79,9 @@ func (m *ResponseMapper) ServeHandler(h http.Handler) http.Handler {
 			mapHeader:      key,
 			mapper:         m.Mapper,
 		}
+		defer nw.mapping()
 
 		h.ServeHTTP(&nw, r)
-
-		nw.mapping()
 	})
 }
 
