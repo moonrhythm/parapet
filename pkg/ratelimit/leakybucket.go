@@ -24,7 +24,7 @@ type LeakyBucket struct {
 	once    sync.Once
 
 	PerRequest time.Duration // time per request
-	Capacity   int           // Queue size
+	Capacity   int           // queue size
 }
 
 type leakyItem struct {
@@ -121,7 +121,7 @@ func (b *LeakyBucket) cleanupLoop() {
 		defer b.mu.Unlock()
 
 		for k, t := range b.storage {
-			if t.Last.Before(deleteBefore) {
+			if t.Count <= 0 && t.Last.Before(deleteBefore) {
 				delete(b.storage, k)
 			}
 		}
