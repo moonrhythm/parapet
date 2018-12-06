@@ -7,27 +7,23 @@ import (
 
 // Concurrent creates new concurrent rate limiter
 func Concurrent(capacity int) *RateLimiter {
-	m := &RateLimiter{
-		Key: ClientIP,
-		Bucket: &ConcurrentBucket{
-			Capacity: capacity,
-		},
-	}
-	return m
+	return New(&ConcurrentStrategy{
+		Capacity: capacity,
+	})
 }
 
-// ConcurrentBucket implements Bucket
+// ConcurrentStrategy implements Strategy
 // that allow only max concurrent requests at a time
 // other requests will drop
-type ConcurrentBucket struct {
+type ConcurrentStrategy struct {
 	mu      sync.Mutex
 	storage map[string]int
 
 	Capacity int // Max concurrent at a time
 }
 
-// Take takes a token
-func (b *ConcurrentBucket) Take(key string) bool {
+// Take returns true if current requests less than capacity
+func (b *ConcurrentStrategy) Take(key string) bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -44,8 +40,8 @@ func (b *ConcurrentBucket) Take(key string) bool {
 	return true
 }
 
-// Put puts token back to bucket
-func (b *ConcurrentBucket) Put(key string) {
+// Put removes requests count
+func (b *ConcurrentStrategy) Put(key string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -64,7 +60,7 @@ func (b *ConcurrentBucket) Put(key string) {
 	}
 }
 
-// After always return 0
-func (b *ConcurrentBucket) After(string) time.Duration {
+// After always return 0, since we don't know when request will finish
+func (b *ConcurrentStrategy) After(string) time.Duration {
 	return 0
 }

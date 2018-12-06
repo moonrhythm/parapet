@@ -7,14 +7,10 @@ import (
 
 // FixedWindow creates new fixed window rate limiter
 func FixedWindow(rate int, unit time.Duration) *RateLimiter {
-	m := &RateLimiter{
-		Key: ClientIP,
-		Bucket: &FixedWindowBucket{
-			Max:  rate,
-			Size: unit,
-		},
-	}
-	return m
+	return New(&FixedWindowStrategy{
+		Max:  rate,
+		Size: unit,
+	})
 }
 
 // FixedWindowPerSecond creates new rate limiter per second
@@ -32,8 +28,8 @@ func FixedWindowPerHour(rate int) *RateLimiter {
 	return FixedWindow(rate, time.Hour)
 }
 
-// FixedWindowBucket implements Bucket using fixed window algorithm
-type FixedWindowBucket struct {
+// FixedWindowStrategy implements Strategy using fixed window algorithm
+type FixedWindowStrategy struct {
 	mu         sync.RWMutex
 	lastWindow int64
 	storage    map[string]int
@@ -43,7 +39,7 @@ type FixedWindowBucket struct {
 }
 
 // Take takes a token from bucket, return true if token available to take
-func (b *FixedWindowBucket) Take(key string) bool {
+func (b *FixedWindowStrategy) Take(key string) bool {
 	currentWindow := time.Now().UnixNano() / int64(b.Size)
 
 	b.mu.Lock()
@@ -79,10 +75,10 @@ func (b *FixedWindowBucket) Take(key string) bool {
 }
 
 // Put does nothing
-func (b *FixedWindowBucket) Put(string) {}
+func (b *FixedWindowStrategy) Put(string) {}
 
 // After returns next time that can take again
-func (b *FixedWindowBucket) After(key string) time.Duration {
+func (b *FixedWindowStrategy) After(key string) time.Duration {
 	now := time.Now()
 	currentWindow := now.UnixNano() / int64(b.Size)
 

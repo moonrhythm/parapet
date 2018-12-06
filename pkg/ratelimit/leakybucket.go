@@ -7,18 +7,14 @@ import (
 
 // Leaky creates new leaky bucket rate limiter
 func Leaky(perRequest time.Duration, capacity int) *RateLimiter {
-	m := &RateLimiter{
-		Key: ClientIP,
-		Bucket: &LeakyBucket{
-			PerRequest: perRequest,
-			Capacity:   capacity,
-		},
-	}
-	return m
+	return New(&LeakyBucketStrategy{
+		PerRequest: perRequest,
+		Capacity:   capacity,
+	})
 }
 
-// LeakyBucket implements Bucket using leaky bucket algorithm
-type LeakyBucket struct {
+// LeakyBucketStrategy implements Strategy using leaky bucket algorithm
+type LeakyBucketStrategy struct {
 	mu      sync.RWMutex
 	storage map[string]*leakyItem
 	once    sync.Once
@@ -33,7 +29,7 @@ type leakyItem struct {
 }
 
 // Take waits until token can be take, unless queue full will return false
-func (b *LeakyBucket) Take(key string) bool {
+func (b *LeakyBucketStrategy) Take(key string) bool {
 	b.once.Do(b.cleanupLoop)
 
 	b.mu.Lock()
@@ -83,10 +79,10 @@ func (b *LeakyBucket) Take(key string) bool {
 }
 
 // Put do nothing
-func (b *LeakyBucket) Put(string) {}
+func (b *LeakyBucketStrategy) Put(string) {}
 
 // After returns time that can take again
-func (b *LeakyBucket) After(key string) time.Duration {
+func (b *LeakyBucketStrategy) After(key string) time.Duration {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
@@ -108,7 +104,7 @@ func (b *LeakyBucket) After(key string) time.Duration {
 	return next.Sub(now)
 }
 
-func (b *LeakyBucket) cleanupLoop() {
+func (b *LeakyBucketStrategy) cleanupLoop() {
 	maxDuration := b.PerRequest + time.Second
 	if maxDuration < time.Minute {
 		maxDuration = time.Minute

@@ -6,15 +6,23 @@ import (
 	"time"
 )
 
+// New creates new rate limiter
+func New(strategy Strategy) *RateLimiter {
+	return &RateLimiter{
+		Key:      ClientIP,
+		Strategy: strategy,
+	}
+}
+
 // RateLimiter middleware
 type RateLimiter struct {
 	Key             func(r *http.Request) string
 	ExceededHandler ExceededHandler
-	Bucket          Bucket
+	Strategy        Strategy
 }
 
-// Bucket interface
-type Bucket interface {
+// Strategy interface
+type Strategy interface {
 	// Take returns true if success
 	Take(key string) bool
 
@@ -28,6 +36,17 @@ type Bucket interface {
 // ExceededHandler type
 type ExceededHandler func(w http.ResponseWriter, r *http.Request, after time.Duration)
 
+func defaultExceededHandler(w http.ResponseWriter, r *http.Request, after time.Duration) {
+	if after > 0 {
+		w.Header().Set("Retry-After", strconv.FormatInt(int64(after/time.Second), 10))
+	}
+	http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
+}
+
+func defaultKey(*http.Request) string {
+	return ""
+}
+
 // ClientIP returns client ip from request
 func ClientIP(r *http.Request) string {
 	return r.Header.Get("X-Forwarded-For")
@@ -36,27 +55,19 @@ func ClientIP(r *http.Request) string {
 // ServeHandler implements middleware interface
 func (m *RateLimiter) ServeHandler(h http.Handler) http.Handler {
 	if m.Key == nil {
-		m.Key = func(*http.Request) string {
-			return ""
-		}
+		m.Key = defaultKey
 	}
-
 	if m.ExceededHandler == nil {
-		m.ExceededHandler = func(w http.ResponseWriter, r *http.Request, after time.Duration) {
-			if after > 0 {
-				w.Header().Set("Retry-After", strconv.FormatInt(int64(after/time.Second), 10))
-			}
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-		}
+		m.ExceededHandler = defaultExceededHandler
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := m.Key(r)
-		if !m.Bucket.Take(key) {
-			m.ExceededHandler(w, r, m.Bucket.After(key))
+		if !m.Strategy.Take(key) {
+			m.ExceededHandler(w, r, m.Strategy.After(key))
 			return
 		}
-		defer m.Bucket.Put(key) // use defer to always put token back when panic
+		defer m.Strategy.Put(key) // use defer to always put token back when panic
 
 		h.ServeHTTP(w, r)
 	})
