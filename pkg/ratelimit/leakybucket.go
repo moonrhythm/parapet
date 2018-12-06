@@ -29,39 +29,12 @@ type LeakyBucket struct {
 
 type leakyItem struct {
 	Last  time.Time // last request time
-	Items int       // requests in queue
+	Count int       // requests in queue
 }
 
 // Take waits until token can be take, unless queue full will return false
 func (b *LeakyBucket) Take(key string) bool {
-	b.once.Do(func() {
-		// cleanup worker
-
-		maxDuration := b.PerRequest + time.Second
-		if maxDuration < time.Minute {
-			maxDuration = time.Minute
-		}
-
-		cleanup := func() {
-			deleteBefore := time.Now().Add(-maxDuration)
-
-			b.mu.Lock()
-			defer b.mu.Unlock()
-
-			for k, t := range b.storage {
-				if t.Last.Before(deleteBefore) {
-					delete(b.storage, k)
-				}
-			}
-		}
-
-		go func() {
-			for {
-				time.Sleep(maxDuration)
-				cleanup()
-			}
-		}()
-	})
+	b.once.Do(b.cleanupLoop)
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -91,20 +64,20 @@ func (b *LeakyBucket) Take(key string) bool {
 		return true
 	}
 
-	if t.Items >= b.Capacity {
+	if t.Count >= b.Capacity {
 		// queue full, drop the request
 		return false
 	}
 
 	t.Last = next
 
-	t.Items++
+	t.Count++
 	b.mu.Unlock()
 
 	time.Sleep(sleep)
 
 	b.mu.Lock()
-	t.Items--
+	t.Count--
 
 	return true
 }
@@ -133,4 +106,31 @@ func (b *LeakyBucket) After(key string) time.Duration {
 	}
 
 	return next.Sub(now)
+}
+
+func (b *LeakyBucket) cleanupLoop() {
+	maxDuration := b.PerRequest + time.Second
+	if maxDuration < time.Minute {
+		maxDuration = time.Minute
+	}
+
+	cleanup := func() {
+		deleteBefore := time.Now().Add(-maxDuration)
+
+		b.mu.Lock()
+		defer b.mu.Unlock()
+
+		for k, t := range b.storage {
+			if t.Last.Before(deleteBefore) {
+				delete(b.storage, k)
+			}
+		}
+	}
+
+	go func() {
+		for {
+			time.Sleep(maxDuration)
+			cleanup()
+		}
+	}()
 }
