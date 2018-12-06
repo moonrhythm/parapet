@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// Leaky creates new leaky bucket rate limiter
-func Leaky(perRequest time.Duration, capacity int) *RateLimiter {
+// LeakyBucket creates new leaky bucket rate limiter
+func LeakyBucket(perRequest time.Duration, size int) *RateLimiter {
 	return New(&LeakyBucketStrategy{
 		PerRequest: perRequest,
-		Capacity:   capacity,
+		Size:       size,
 	})
 }
 
@@ -20,7 +20,7 @@ type LeakyBucketStrategy struct {
 	once    sync.Once
 
 	PerRequest time.Duration // time per request
-	Capacity   int           // queue size
+	Size       int           // queue size
 }
 
 type leakyItem struct {
@@ -60,7 +60,7 @@ func (b *LeakyBucketStrategy) Take(key string) bool {
 		return true
 	}
 
-	if t.Count >= b.Capacity {
+	if t.Count >= b.Size {
 		// queue full, drop the request
 		return false
 	}
