@@ -1,7 +1,6 @@
 package ratelimit
 
 import (
-	"net/http"
 	"sync"
 	"time"
 )
@@ -9,9 +8,7 @@ import (
 // NewFixedWindow creates new fixed window rate limiter
 func NewFixedWindow(rate int, unit time.Duration) *RateLimiter {
 	m := &RateLimiter{
-		Key: func(r *http.Request) string {
-			return r.Header.Get("X-Forwarded-For")
-		},
+		Key: ClientIP,
 		Bucket: &FixedWindowBucket{
 			Max:  rate,
 			Size: unit,

@@ -22,6 +22,11 @@ type Bucket interface {
 // ExceededHandler type
 type ExceededHandler func(w http.ResponseWriter, r *http.Request, after time.Duration)
 
+// ClientIP returns client ip from request
+func ClientIP(r *http.Request) string {
+	return r.Header.Get("X-Forwarded-For")
+}
+
 // ServeHandler implements middleware interface
 func (m *RateLimiter) ServeHandler(h http.Handler) http.Handler {
 	if m.Key == nil {
