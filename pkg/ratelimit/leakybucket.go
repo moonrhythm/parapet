@@ -6,11 +6,12 @@ import (
 )
 
 // Leaky creates new leaky bucket rate limiter
-func Leaky(capacity int) *RateLimiter {
+func Leaky(perRequest time.Duration, capacity int) *RateLimiter {
 	m := &RateLimiter{
 		Key: ClientIP,
 		Bucket: &LeakyBucket{
-			Capacity: capacity,
+			PerRequest: perRequest,
+			Capacity:   capacity,
 		},
 	}
 	return m
@@ -18,47 +19,118 @@ func Leaky(capacity int) *RateLimiter {
 
 // LeakyBucket implements Bucket using leaky bucket algorithm
 type LeakyBucket struct {
-	mu      sync.Mutex
-	storage map[string]int
+	mu      sync.RWMutex
+	storage map[string]*leakyItem
+	once    sync.Once
 
-	Capacity int // Queue size
+	PerRequest time.Duration // time per request
+	Capacity   int           // Queue size
 }
 
-// Take takes a token by pushs request to queue
+type leakyItem struct {
+	Last  time.Time // last request time
+	Items int       // requests in queue
+}
+
+// Take waits until token can be take, unless queue full will return false
 func (b *LeakyBucket) Take(key string) bool {
+	b.once.Do(func() {
+		// cleanup worker
+
+		maxDuration := b.PerRequest + time.Second
+		if maxDuration < time.Minute {
+			maxDuration = time.Minute
+		}
+
+		cleanup := func() {
+			deleteBefore := time.Now().Add(-maxDuration)
+
+			b.mu.Lock()
+			defer b.mu.Unlock()
+
+			for k, t := range b.storage {
+				if t.Last.Before(deleteBefore) {
+					delete(b.storage, k)
+				}
+			}
+		}
+
+		go func() {
+			for {
+				time.Sleep(maxDuration)
+				cleanup()
+			}
+		}()
+	})
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
 	if b.storage == nil {
-		b.storage = make(map[string]int)
+		b.storage = make(map[string]*leakyItem)
 	}
 
-	if b.storage[key] >= b.Capacity {
+	if b.storage[key] == nil {
+		b.storage[key] = new(leakyItem)
+	}
+
+	t := b.storage[key]
+
+	now := time.Now()
+
+	// first request ?
+	if t.Last.IsZero() {
+		t.Last = now
+		return true
+	}
+
+	next := t.Last.Add(b.PerRequest)
+	sleep := next.Sub(now)
+	if sleep <= 0 {
+		t.Last = now
+		return true
+	}
+
+	if t.Items >= b.Capacity {
+		// queue full, drop the request
 		return false
 	}
 
-	b.storage[key]++
+	t.Last = next
+
+	t.Items++
+	b.mu.Unlock()
+
+	time.Sleep(sleep)
+
+	b.mu.Lock()
+	t.Items--
 
 	return true
 }
 
-// Put puts token back to bucket by pop from queue
-func (b *LeakyBucket) Put(key string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
+// Put do nothing
+func (b *LeakyBucket) Put(string) {}
+
+// After returns time that can take again
+func (b *LeakyBucket) After(key string) time.Duration {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 
 	if b.storage == nil {
-		return
+		return 0
 	}
 
-	if b.storage[key] <= 0 {
-		return
+	t := b.storage[key]
+	if t == nil {
+		return 0
 	}
 
-	b.storage[key]--
-}
+	now := time.Now()
+	next := t.Last.Add(b.PerRequest)
+	if next.Before(now) {
+		return 0
+	}
 
-// After always return 0
-func (b *LeakyBucket) After(string) time.Duration {
-	return 0
+	return next.Sub(now)
 }
