@@ -15,7 +15,13 @@ type RateLimiter struct {
 
 // Bucket interface
 type Bucket interface {
+	// Take returns true if success
 	Take(key string) bool
+
+	// Put calls after finished
+	Put(key string)
+
+	// After returns next time that can take again
 	After(key string) time.Duration
 }
 
@@ -37,7 +43,9 @@ func (m *RateLimiter) ServeHandler(h http.Handler) http.Handler {
 
 	if m.ExceededHandler == nil {
 		m.ExceededHandler = func(w http.ResponseWriter, r *http.Request, after time.Duration) {
-			w.Header().Set("Retry-After", strconv.FormatInt(int64(after/time.Second), 10))
+			if after > 0 {
+				w.Header().Set("Retry-After", strconv.FormatInt(int64(after/time.Second), 10))
+			}
 			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 		}
 	}
@@ -48,6 +56,7 @@ func (m *RateLimiter) ServeHandler(h http.Handler) http.Handler {
 			m.ExceededHandler(w, r, m.Bucket.After(key))
 			return
 		}
+		defer m.Bucket.Put(key) // use defer to always put token back when panic
 
 		h.ServeHTTP(w, r)
 	})

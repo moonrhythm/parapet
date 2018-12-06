@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// NewFixedWindow creates new fixed window rate limiter
-func NewFixedWindow(rate int, unit time.Duration) *RateLimiter {
+// FixedWindow creates new fixed window rate limiter
+func FixedWindow(rate int, unit time.Duration) *RateLimiter {
 	m := &RateLimiter{
 		Key: ClientIP,
 		Bucket: &FixedWindowBucket{
@@ -19,20 +19,20 @@ func NewFixedWindow(rate int, unit time.Duration) *RateLimiter {
 
 // FixedWindowPerSecond creates new rate limiter per second
 func FixedWindowPerSecond(rate int) *RateLimiter {
-	return NewFixedWindow(rate, time.Second)
+	return FixedWindow(rate, time.Second)
 }
 
 // FixedWindowPerMinute creates new rate limiter per minute
 func FixedWindowPerMinute(rate int) *RateLimiter {
-	return NewFixedWindow(rate, time.Minute)
+	return FixedWindow(rate, time.Minute)
 }
 
 // FixedWindowPerHour creates new rate limiter per hour
 func FixedWindowPerHour(rate int) *RateLimiter {
-	return NewFixedWindow(rate, time.Hour)
+	return FixedWindow(rate, time.Hour)
 }
 
-// FixedWindowBucket implement Bucket using fixed window algorithm
+// FixedWindowBucket implements Bucket using fixed window algorithm
 type FixedWindowBucket struct {
 	mu         sync.RWMutex
 	lastWindow int64
@@ -77,6 +77,9 @@ func (b *FixedWindowBucket) Take(key string) bool {
 
 	return true
 }
+
+// Put does nothing
+func (b *FixedWindowBucket) Put(string) {}
 
 // After returns next time that can take again
 func (b *FixedWindowBucket) After(key string) time.Duration {
