@@ -2,100 +2,119 @@ package ratelimit
 
 import (
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 )
 
-// NewFixedWindow creates new fixed window rate limiter with default config
-func NewFixedWindow(rate int, unit time.Duration) *FixedWindowRateLimiter {
-	m := &FixedWindowRateLimiter{
+// NewFixedWindow creates new fixed window rate limiter
+func NewFixedWindow(rate int, unit time.Duration) *RateLimiter {
+	m := &RateLimiter{
 		Key: func(r *http.Request) string {
 			return r.Header.Get("X-Forwarded-For")
 		},
-		Rate: rate,
-		Unit: unit,
+		Bucket: &FixedWindowBucket{
+			Max:  rate,
+			Size: unit,
+		},
 	}
 	return m
 }
 
 // FixedWindowPerSecond creates new rate limiter per second
-func FixedWindowPerSecond(rate int) *FixedWindowRateLimiter {
+func FixedWindowPerSecond(rate int) *RateLimiter {
 	return NewFixedWindow(rate, time.Second)
 }
 
 // FixedWindowPerMinute creates new rate limiter per minute
-func FixedWindowPerMinute(rate int) *FixedWindowRateLimiter {
+func FixedWindowPerMinute(rate int) *RateLimiter {
 	return NewFixedWindow(rate, time.Minute)
 }
 
 // FixedWindowPerHour creates new rate limiter per hour
-func FixedWindowPerHour(rate int) *FixedWindowRateLimiter {
+func FixedWindowPerHour(rate int) *RateLimiter {
 	return NewFixedWindow(rate, time.Hour)
 }
 
-// FixedWindowRateLimiter middleware
-type FixedWindowRateLimiter struct {
-	Key             func(r *http.Request) string
-	Rate            int
-	Unit            time.Duration
-	ExceededHandler http.Handler
+// FixedWindowBucket implement Bucket using fixed window algorithm
+type FixedWindowBucket struct {
+	mu         sync.RWMutex
+	lastWindow int64
+	storage    map[string]int
 
-	bucket fixedWindowBucket
+	Max  int           // Max token per window
+	Size time.Duration // Window size
 }
 
-// ServeHandler implements middleware interface
-func (m *FixedWindowRateLimiter) ServeHandler(h http.Handler) http.Handler {
-	if m.Key == nil || m.Rate <= 0 || m.Unit <= 0 {
-		return h
-	}
+// Take takes a token from bucket, return true if token available to take
+func (b *FixedWindowBucket) Take(key string) bool {
+	currentWindow := time.Now().UnixNano() / int64(b.Size)
 
-	if m.ExceededHandler == nil {
-		m.ExceededHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			now := time.Now()
-			after := (now.Truncate(m.Unit).UnixNano() + int64(m.Unit) - now.UnixNano()) / int64(time.Second)
-			if after <= 0 {
-				after = 1
-			}
-			w.Header().Set("Retry-After", strconv.FormatInt(after, 10))
-			http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
-		})
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t := time.Now().UnixNano() / int64(m.Unit)
-		key := m.Key(r)
-
-		current := m.bucket.Incr(t, key, m.Rate)
-		if current > m.Rate {
-			m.ExceededHandler.ServeHTTP(w, r)
-			return
-		}
-
-		h.ServeHTTP(w, r)
-	})
-}
-
-type fixedWindowBucket struct {
-	mu sync.Mutex
-	t  int64
-	d  map[string]int
-}
-
-func (b *fixedWindowBucket) Incr(t int64, k string, max int) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if b.t != t {
-		b.t = t
-		if len(b.d) > 0 || b.d == nil {
-			b.d = make(map[string]int)
+	// is window outdated ?
+	if b.lastWindow != currentWindow {
+		// window outdated, create new window
+		b.lastWindow = currentWindow
+		if len(b.storage) > 0 || b.storage == nil {
+			b.storage = make(map[string]int)
 		}
 	}
 
-	x := b.d[k] + 1
-	if x <= max {
-		b.d[k] = x
+	// get available token
+	available, ok := b.storage[key]
+	if !ok {
+		// bucket of given key not exists
+		// set available to max
+		available = b.Max
 	}
-	return x
+
+	// can we take a token ?
+	if available <= 0 {
+		// token not available
+		return false
+	}
+
+	// take a token
+	b.storage[key] = available - 1
+
+	return true
+}
+
+// After returns next time that can take again
+func (b *FixedWindowBucket) After(key string) time.Duration {
+	now := time.Now()
+	currentWindow := now.UnixNano() / int64(b.Size)
+
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	// is current window outdated ?
+	if b.lastWindow != currentWindow {
+		// window outdated, can take now
+		return 0
+	}
+
+	if b.storage == nil {
+		// no storage exists, can take now
+		return 0
+	}
+
+	// get available token
+	available, ok := b.storage[key]
+	if !ok {
+		// bucket of given key not exists
+		// can take now
+		return 0
+	}
+
+	if available > 0 {
+		// still more tokens in bucket
+		// can take now
+		return 0
+	}
+
+	// no more token left
+	nextWindow := now.Truncate(b.Size).Add(b.Size)
+	return nextWindow.Sub(now)
 }
