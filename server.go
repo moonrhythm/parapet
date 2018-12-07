@@ -21,17 +21,17 @@ type Server struct {
 	once sync.Once
 	ms   Middlewares
 
-	Addr              string
-	Handler           http.Handler
-	ReadTimeout       time.Duration
-	ReadHeaderTimeout time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
-	TCPKeepAlive      time.Duration
-	GraceTimeout      time.Duration
-	ErrorLog          *log.Logger
-	TrustProxy        bool
-	EnableH2C         bool
+	Addr               string
+	Handler            http.Handler
+	ReadTimeout        time.Duration
+	ReadHeaderTimeout  time.Duration
+	WriteTimeout       time.Duration
+	IdleTimeout        time.Duration
+	TCPKeepAlivePeriod time.Duration
+	GraceTimeout       time.Duration
+	ErrorLog           *log.Logger
+	TrustProxy         bool
+	EnableH2C          bool
 }
 
 // Use uses middleware
@@ -116,7 +116,7 @@ func (s *Server) listenAndServe() error {
 		return s.Serve(ln)
 	}
 
-	return s.Serve(tcpKeepAliveListener{ln.(*net.TCPListener), s.TCPKeepAlive})
+	return s.Serve(tcpListener{ln.(*net.TCPListener), s.TCPKeepAlivePeriod})
 }
 
 // Serve serves incoming connections

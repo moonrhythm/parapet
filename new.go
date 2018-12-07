@@ -11,24 +11,23 @@ import (
 // but run behide reverse proxy
 func New() *Server {
 	return &Server{
-		IdleTimeout:  10*time.Minute + 20*time.Second,
-		TCPKeepAlive: 10*time.Minute + 20*time.Second,
-		GraceTimeout: 30 * time.Second,
-		TrustProxy:   true,
-		Handler:      http.NotFoundHandler(),
+		TCPKeepAlivePeriod: 3 * time.Minute,
+		GraceTimeout:       30 * time.Second,
+		TrustProxy:         true,
+		Handler:            http.NotFoundHandler(),
 	}
 }
 
 // NewFrontend creates new frontend server default config
 func NewFrontend() *Server {
 	return &Server{
-		ReadTimeout:       time.Minute,
-		ReadHeaderTimeout: time.Minute,
-		WriteTimeout:      15 * time.Second,
-		IdleTimeout:       75 * time.Second,
-		TCPKeepAlive:      75 * time.Second,
-		GraceTimeout:      30 * time.Second,
-		Handler:           http.NotFoundHandler(),
+		ReadHeaderTimeout:  10 * time.Second,
+		ReadTimeout:        1 * time.Minute,
+		WriteTimeout:       1 * time.Minute,
+		IdleTimeout:        75 * time.Second,
+		TCPKeepAlivePeriod: 60 * time.Second,
+		GraceTimeout:       30 * time.Second,
+		Handler:            http.NotFoundHandler(),
 	}
 }
 
@@ -38,11 +37,10 @@ func NewFrontend() *Server {
 // or run behide other reverse proxy
 func NewBackend() *Server {
 	return &Server{
-		IdleTimeout:  10*time.Minute + 20*time.Second,
-		TCPKeepAlive: 10*time.Minute + 20*time.Second,
-		GraceTimeout: 30 * time.Second,
-		TrustProxy:   true,
-		EnableH2C:    true,
-		Handler:      http.NotFoundHandler(),
+		TCPKeepAlivePeriod: 3 * time.Minute,
+		GraceTimeout:       30 * time.Second,
+		TrustProxy:         true,
+		EnableH2C:          true,
+		Handler:            http.NotFoundHandler(),
 	}
 }

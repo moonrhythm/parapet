@@ -5,17 +5,18 @@ import (
 	"time"
 )
 
-type tcpKeepAliveListener struct {
+type tcpListener struct {
 	*net.TCPListener
-	duration time.Duration
+
+	KeepAlivePeriod time.Duration
 }
 
-func (ln tcpKeepAliveListener) Accept() (net.Conn, error) {
+func (ln tcpListener) Accept() (net.Conn, error) {
 	tc, err := ln.AcceptTCP()
 	if err != nil {
 		return nil, err
 	}
 	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(ln.duration)
+	tc.SetKeepAlivePeriod(ln.KeepAlivePeriod)
 	return tc, nil
 }
