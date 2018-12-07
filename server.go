@@ -112,7 +112,7 @@ func (s *Server) listenAndServe() error {
 		return err
 	}
 
-	if s.TCPKeepAlive == 0 {
+	if s.TCPKeepAlivePeriod == 0 {
 		return s.Serve(ln)
 	}
 
