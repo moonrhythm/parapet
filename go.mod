@@ -7,6 +7,7 @@ require (
 	github.com/google/martian v2.1.0+incompatible // indirect
 	github.com/googleapis/gax-go v2.0.2+incompatible // indirect
 	github.com/kavu/go_reuseport v1.4.0
+	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
 	go.opencensus.io v0.18.0 // indirect
 	golang.org/x/net v0.0.0-20181201002055-351d144fa1fc
 	golang.org/x/oauth2 v0.0.0-20181203162652-d668ce993890 // indirect
