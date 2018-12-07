@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kavu/go_reuseport"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -31,7 +32,8 @@ type Server struct {
 	GraceTimeout       time.Duration
 	ErrorLog           *log.Logger
 	TrustProxy         bool
-	EnableH2C          bool
+	H2C                bool
+	ReusePort          bool
 }
 
 // Use uses middleware
@@ -64,7 +66,7 @@ func (s *Server) configHandler() {
 	s.once.Do(func() {
 		h := s.ms.ServeHandler(s.Handler)
 		h = trustProxy{s.TrustProxy}.ServeHandler(h)
-		if s.EnableH2C {
+		if s.H2C {
 			h2s := &http2.Server{}
 			h = h2c.NewHandler(h, h2s)
 		}
@@ -107,7 +109,14 @@ func (s *Server) listenAndServe() error {
 	if addr == "" {
 		addr = ":http"
 	}
-	ln, err := net.Listen("tcp", addr)
+
+	var ln net.Listener
+	var err error
+	if s.ReusePort {
+		ln, err = reuseport.NewReusablePortListener("tcp", addr)
+	} else {
+		ln, err = net.Listen("tcp", addr)
+	}
 	if err != nil {
 		return err
 	}

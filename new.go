@@ -14,6 +14,7 @@ func New() *Server {
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		TrustProxy:         true,
+		ReusePort:          true,
 		Handler:            http.NotFoundHandler(),
 	}
 }
@@ -27,6 +28,7 @@ func NewFrontend() *Server {
 		IdleTimeout:        75 * time.Second,
 		TCPKeepAlivePeriod: 60 * time.Second,
 		GraceTimeout:       30 * time.Second,
+		ReusePort:          true,
 		Handler:            http.NotFoundHandler(),
 	}
 }
@@ -40,7 +42,8 @@ func NewBackend() *Server {
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		TrustProxy:         true,
-		EnableH2C:          true,
+		H2C:                true,
+		ReusePort:          true,
 		Handler:            http.NotFoundHandler(),
 	}
 }
