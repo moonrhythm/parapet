@@ -1,6 +1,9 @@
 package logger
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type ctxKeyRecord struct{}
 
@@ -14,10 +17,38 @@ func newRecord() *record {
 }
 
 func (r *record) Set(name string, value interface{}) {
-	if value == "" || value == 0 {
-		return
-	}
 	r.data[name] = value
+}
+
+func (r *record) omitEmpty() {
+	for k, v := range r.data {
+		if isEmpty(v) {
+			delete(r.data, k)
+		}
+	}
+}
+
+func isEmpty(v interface{}) bool {
+	switch v := v.(type) {
+	case string:
+		return v == ""
+	case int:
+		return v == 0
+	case int64:
+		return v == 0
+	case int32:
+		return v == 0
+	case float64:
+		return v == 0
+	case float32:
+		return v == 0
+	case time.Time:
+		return v.IsZero()
+	case *time.Time:
+		return v.IsZero()
+	default:
+		return false
+	}
 }
 
 func getRecord(ctx context.Context) *record {

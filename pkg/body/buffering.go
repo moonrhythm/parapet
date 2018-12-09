@@ -74,7 +74,7 @@ func (m *RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 			r.ContentLength, _ = fp.Seek(0, os.SEEK_CUR)
 			r.TransferEncoding = []string{} // change to identity encoding
 			r.Body = fp
-			logger.Set(r.Context(), "content_length", r.ContentLength)
+			logger.Set(r.Context(), "responseBodySize", r.ContentLength)
 
 			fp.Seek(0, os.SEEK_SET)
 		}

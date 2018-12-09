@@ -12,22 +12,23 @@ import (
 
 // Logger middleware
 type Logger struct {
-	Writer io.Writer
-
-	RequestID string
+	Writer    io.Writer
+	OmitEmpty bool
 }
 
 // Stdout creates new stdout logger
 func Stdout() *Logger {
 	return &Logger{
-		Writer: os.Stdout,
+		Writer:    os.Stdout,
+		OmitEmpty: true,
 	}
 }
 
 // Stderr creates new stderr logger
 func Stderr() *Logger {
 	return &Logger{
-		Writer: os.Stderr,
+		Writer:    os.Stderr,
+		OmitEmpty: true,
 	}
 }
 
@@ -37,25 +38,22 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 		m.Writer = os.Stdout
 	}
 
-	if m.RequestID == "" {
-		m.RequestID = "X-Request-Id"
-	}
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		proto := r.Header.Get("X-Forwarded-Proto")
+		realIP := r.Header.Get("X-Forwarded-For")
+		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
 		d := newRecord()
-		d.Set("date", start.Format(time.RFC3339))
-		d.Set("method", r.Method)
+		d.Set("timestamp", start.Format(time.RFC3339))
 		d.Set("host", r.Host)
-		d.Set("uri", r.RequestURI)
-		d.Set("user_agent", r.UserAgent())
+		d.Set("requestMethod", r.Method)
+		d.Set("requestUrl", proto+"://"+r.Host+r.RequestURI)
+		d.Set("requestBodySize", r.ContentLength)
 		d.Set("referer", r.Referer())
-		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
-		d.Set("remote_ip", remoteIP)
-		d.Set("content_length", r.ContentLength)
-		d.Set("real_ip", r.Header.Get("X-Forwarded-For"))
-		d.Set("proto", r.Header.Get("X-Forwarded-Proto"))
+		d.Set("userAgent", r.UserAgent())
+		d.Set("remoteIp", remoteIP)
+		d.Set("realIp", realIP)
 
 		nw := responseWriter{ResponseWriter: w}
 		defer func() {
@@ -65,10 +63,11 @@ func (m *Logger) ServeHandler(h http.Handler) http.Handler {
 
 			duration := time.Since(start)
 			d.Set("duration", duration.Nanoseconds())
-			d.Set("duration_human", duration.String())
-			d.Set("status_code", nw.statusCode)
-			d.Set("response_body_bytes", nw.length)
+			d.Set("durationHuman", duration.String())
+			d.Set("status", nw.statusCode)
+			d.Set("responseBodySize", nw.length)
 
+			d.omitEmpty()
 			json.NewEncoder(m.Writer).Encode(d.data)
 		}()
 
