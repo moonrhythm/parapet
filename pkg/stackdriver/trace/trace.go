@@ -34,6 +34,10 @@ func (m *Trace) ServeHandler(h http.Handler) http.Handler {
 
 	return &ochttp.Handler{
 		Handler: h,
+		FormatSpanName: func(r *http.Request) string {
+			proto := r.Header.Get("X-Forwarded-Proto")
+			return proto + "://" + r.Host + r.RequestURI
+		},
 		StartOptions: trace.StartOptions{
 			Sampler:  trace.AlwaysSample(),
 			SpanKind: trace.SpanKindServer,
