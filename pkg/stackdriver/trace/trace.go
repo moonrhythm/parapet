@@ -33,7 +33,11 @@ func (m *Trace) ServeHandler(h http.Handler) http.Handler {
 	trace.RegisterExporter(exporter)
 
 	return &ochttp.Handler{
-		Handler:          h,
+		Handler: h,
+		StartOptions: trace.StartOptions{
+			Sampler:  trace.AlwaysSample(),
+			SpanKind: trace.SpanKindServer,
+		},
 		IsPublicEndpoint: m.IsPublicEndpoint,
 	}
 }
