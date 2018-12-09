@@ -1,6 +1,7 @@
 package trace
 
 import (
+	"log"
 	"net/http"
 
 	"contrib.go.opencensus.io/exporter/stackdriver"
@@ -25,6 +26,7 @@ func (m *Trace) ServeHandler(h http.Handler) http.Handler {
 		ProjectID: m.ProjectID,
 	})
 	if err != nil {
+		log.Println("stackdriver/trace:", err)
 		return h
 	}
 
