@@ -15,6 +15,7 @@ func New() *Server {
 		GraceTimeout:       30 * time.Second,
 		TrustProxy:         true,
 		ReusePort:          true,
+		TrackConnState:     true,
 		Handler:            http.NotFoundHandler(),
 	}
 }
@@ -29,6 +30,7 @@ func NewFrontend() *Server {
 		TCPKeepAlivePeriod: 60 * time.Second,
 		GraceTimeout:       30 * time.Second,
 		ReusePort:          true,
+		TrackConnState:     true,
 		Handler:            http.NotFoundHandler(),
 	}
 }
