@@ -16,8 +16,6 @@ type Middleware interface {
 // Middlewares type
 type Middlewares []Middleware
 
-var _ Block = new(Middlewares)
-
 // Use uses middleware
 func (ms *Middlewares) Use(m Middleware) {
 	if m == nil {
@@ -27,9 +25,9 @@ func (ms *Middlewares) Use(m Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (ms *Middlewares) ServeHandler(h http.Handler) http.Handler {
-	for i := len(*ms); i > 0; i-- {
-		h = (*ms)[i-1].ServeHandler(h)
+func (ms Middlewares) ServeHandler(h http.Handler) http.Handler {
+	for i := len(ms); i > 0; i-- {
+		h = ms[i-1].ServeHandler(h)
 	}
 	return h
 }

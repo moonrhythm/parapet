@@ -7,23 +7,23 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
-// RemoteIP creates new remote ip host block
-func RemoteIP() parapet.Block {
-	return new(RemoteIPBlock)
+// NewRemoteIP creates new remote ip host block
+func NewRemoteIP() *RemoteIP {
+	return new(RemoteIP)
 }
 
-// RemoteIPBlock type
-type RemoteIPBlock struct {
+// RemoteIP middleware
+type RemoteIP struct {
 	ms parapet.Middlewares
 }
 
 // Use uses middleware
-func (host *RemoteIPBlock) Use(m parapet.Middleware) {
+func (host *RemoteIP) Use(m parapet.Middleware) {
 	host.ms.Use(m)
 }
 
 // ServeHandler implements middleware interface
-func (host *RemoteIPBlock) ServeHandler(h http.Handler) http.Handler {
+func (host *RemoteIP) ServeHandler(h http.Handler) http.Handler {
 	next := host.ms.ServeHandler(http.NotFoundHandler())
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

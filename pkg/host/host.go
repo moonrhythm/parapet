@@ -6,7 +6,7 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
-// New creates new host
+// New creates new host middleware
 func New(host ...string) *Host {
 	return &Host{Hosts: host}
 }
