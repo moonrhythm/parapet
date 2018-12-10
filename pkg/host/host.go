@@ -6,23 +6,20 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
+// New creates new host middleware
+func New(host ...string) *Host {
+	return &Host{Hosts: host}
+}
+
 // Host middleware
 type Host struct {
 	Hosts []string
 	ms    parapet.Middlewares
 }
 
-// New creates new host
-func New(host ...string) *Host {
-	return &Host{Hosts: host}
-}
-
 // Use uses middleware
 func (host *Host) Use(m parapet.Middleware) {
-	if m == nil {
-		return
-	}
-	host.ms = append(host.ms, m)
+	host.ms.Use(m)
 }
 
 // ServeHandler implements middleware interface
