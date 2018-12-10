@@ -6,7 +6,7 @@ import (
 
 // Authenticator middleware
 type Authenticator struct {
-	Authenticate  string
+	Type          string
 	Authenticator func(*http.Request) bool
 }
 
@@ -18,8 +18,8 @@ func (m *Authenticator) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !m.Authenticator(r) {
-			if m.Authenticate != "" {
-				w.Header().Set("WWW-Authenticate", m.Authenticate)
+			if m.Type != "" {
+				w.Header().Set("WWW-Authenticate", m.Type)
 			}
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
