@@ -2,6 +2,12 @@ package parapet
 
 import "net/http"
 
+// Block is the middleware block
+type Block interface {
+	Middleware
+	Use(Middleware)
+}
+
 // Middleware is the http middleware
 type Middleware interface {
 	ServeHandler(http.Handler) http.Handler
@@ -9,6 +15,8 @@ type Middleware interface {
 
 // Middlewares type
 type Middlewares []Middleware
+
+var _ Block = new(Middlewares)
 
 // Use uses middleware
 func (ms *Middlewares) Use(m Middleware) {
@@ -19,9 +27,9 @@ func (ms *Middlewares) Use(m Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (ms Middlewares) ServeHandler(h http.Handler) http.Handler {
-	for i := len(ms); i > 0; i-- {
-		h = ms[i-1].ServeHandler(h)
+func (ms *Middlewares) ServeHandler(h http.Handler) http.Handler {
+	for i := len(*ms); i > 0; i-- {
+		h = (*ms)[i-1].ServeHandler(h)
 	}
 	return h
 }
