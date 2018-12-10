@@ -20,10 +20,7 @@ type PrefixMatcher struct {
 
 // Use uses middleware
 func (l *PrefixMatcher) Use(m parapet.Middleware) {
-	if m == nil {
-		return
-	}
-	l.ms = append(l.ms, m)
+	l.ms.Use(m)
 }
 
 // ServeHandler implements middleware interface

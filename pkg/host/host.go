@@ -19,10 +19,7 @@ func New(host ...string) *Host {
 
 // Use uses middleware
 func (host *Host) Use(m parapet.Middleware) {
-	if m == nil {
-		return
-	}
-	host.ms = append(host.ms, m)
+	host.ms.Use(m)
 }
 
 // ServeHandler implements middleware interface
