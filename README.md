@@ -42,6 +42,7 @@ func main() {
     // sites
     s.Use(example())
     s.Use(mysite())
+    s.Use(wordpress())
 
     // health check
     {
@@ -104,6 +105,25 @@ func mysite() parapet.Middleware {
     }
 
     return hs
+}
+
+func wordpress() parapet.Middleware {
+    h := host.New("myblogaaa.com", "www.myblogaaa.com")
+    h.Use(ratelimit.FixedWindowPerMinute(150))
+    h.Use(redirect.HTTPS())
+    h.Use(hsts.Preload())
+    h.Use(redirect.NonWWW())
+
+    backend := upstream.New("http://wordpress.default.svc.cluster.local")
+
+    l := location.RegExp(`\.(js|css|svg|png|jp(e)?g|gif)$`)
+    l.Use(headers.SetResponse("Cache-Control", "public, max-age=31536000"))
+    l.Use(backend)
+    h.Use(l)
+
+    h.Use(backend)
+
+    return h
 }
 ```
 
