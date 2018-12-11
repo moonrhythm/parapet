@@ -1,5 +1,8 @@
 # parapet
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/moonrhythm/parapet)](https://goreportcard.com/report/github.com/moonrhythm/parapet)
+[![GoDoc](https://godoc.org/github.com/moonrhythm/parapet?status.svg)](https://godoc.org/github.com/moonrhythm/parapet)
+
 Reverse Proxy Framework
 
 > Currently in very early stage, API will breaking change a lot!!!
