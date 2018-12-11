@@ -130,3 +130,7 @@ func wordpress() parapet.Middleware {
 ## License
 
 MIT
+
+## Request new feature ?
+
+Hire us!!! contact@moonrhythm.io
