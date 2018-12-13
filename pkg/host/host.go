@@ -2,6 +2,7 @@ package host
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/moonrhythm/parapet"
 )
@@ -38,11 +39,18 @@ func (host *Host) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !hostMap[r.Host] {
-			h.ServeHTTP(w, r)
+		// exact match
+		if hostMap[r.Host] {
+			next.ServeHTTP(w, r)
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		// wildcard subdomain
+		if i := strings.Index(r.Host, "."); i > 0 && hostMap["*"+r.Host[i:]] {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		h.ServeHTTP(w, r)
 	})
 }
