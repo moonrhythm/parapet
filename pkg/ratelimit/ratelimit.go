@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"net"
 	"net/http"
 	"strconv"
 	"time"
@@ -49,7 +50,12 @@ func defaultKey(*http.Request) string {
 
 // ClientIP returns client ip from request
 func ClientIP(r *http.Request) string {
-	return r.Header.Get("X-Forwarded-For")
+	ipStr := r.Header.Get("X-Forwarded-For")
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return ipStr
+	}
+	return string(ip)
 }
 
 // ServeHandler implements middleware interface
