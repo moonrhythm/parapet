@@ -8,8 +8,8 @@ import (
 )
 
 // New creates new rate limiter
-func New(strategy Strategy) *RateLimiter {
-	return &RateLimiter{
+func New(strategy Strategy) RateLimiter {
+	return RateLimiter{
 		Key:      ClientIP,
 		Strategy: strategy,
 	}
@@ -59,7 +59,7 @@ func ClientIP(r *http.Request) string {
 }
 
 // ServeHandler implements middleware interface
-func (m *RateLimiter) ServeHandler(h http.Handler) http.Handler {
+func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 	if m.Key == nil {
 		m.Key = defaultKey
 	}

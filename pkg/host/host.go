@@ -8,8 +8,8 @@ import (
 )
 
 // New creates new host middleware
-func New(host ...string) *Host {
-	return &Host{Hosts: host}
+func New(host ...string) Host {
+	return Host{Hosts: host}
 }
 
 // Host middleware
@@ -24,7 +24,7 @@ func (host *Host) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (host *Host) ServeHandler(h http.Handler) http.Handler {
+func (host Host) ServeHandler(h http.Handler) http.Handler {
 	next := host.ms.ServeHandler(http.NotFoundHandler())
 
 	// build host map
@@ -45,7 +45,7 @@ func (host *Host) ServeHandler(h http.Handler) http.Handler {
 			return
 		}
 
-		// wildcard subdomain
+		// wildcard subdomains
 		if i := strings.Index(r.Host, "."); i > 0 && hostMap["*"+r.Host[i:]] {
 			next.ServeHTTP(w, r)
 			return

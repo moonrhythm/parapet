@@ -8,11 +8,11 @@ import (
 )
 
 // NewCIDR creates new CIDR host matcher
-func NewCIDR(pattern ...string) *CIDR {
-	return &CIDR{Patterns: pattern}
+func NewCIDR(pattern ...string) CIDR {
+	return CIDR{Patterns: pattern}
 }
 
-// CIDR matchs http host with CIDR
+// CIDR matches http host with CIDR
 type CIDR struct {
 	Patterns []string
 	ms       parapet.Middlewares
@@ -24,7 +24,7 @@ func (host *CIDR) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (host *CIDR) ServeHandler(h http.Handler) http.Handler {
+func (host CIDR) ServeHandler(h http.Handler) http.Handler {
 	next := host.ms.ServeHandler(http.NotFoundHandler())
 
 	var nets []*net.IPNet

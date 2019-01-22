@@ -7,15 +7,15 @@ import (
 )
 
 // Preload creates new PreloadPusher
-func Preload() *PreloadPusher {
-	return new(PreloadPusher)
+func Preload() PreloadPusher {
+	return PreloadPusher{}
 }
 
-// PreloadPusher pushs preload link
+// PreloadPusher pushes preload link
 type PreloadPusher struct{}
 
 // ServeHandler implements middleware interface
-func (m *PreloadPusher) ServeHandler(h http.Handler) http.Handler {
+func (m PreloadPusher) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// skip if not support pusher
 		_, ok := w.(http.Pusher)

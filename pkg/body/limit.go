@@ -7,8 +7,8 @@ import (
 )
 
 // LimitRequest creates new request limiter
-func LimitRequest(size int64) *RequestLimiter {
-	return &RequestLimiter{Size: size}
+func LimitRequest(size int64) RequestLimiter {
+	return RequestLimiter{Size: size}
 }
 
 // RequestLimiter limits request body size
@@ -18,9 +18,9 @@ type RequestLimiter struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *RequestLimiter) ServeHandler(h http.Handler) http.Handler {
+func (m RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 	if m.Size < 0 {
-		// unlimit
+		// unlimited
 		return h
 	}
 

@@ -13,8 +13,8 @@ import (
 )
 
 // New creates new trace middleware
-func New() *Trace {
-	return &Trace{}
+func New() Trace {
+	return Trace{}
 }
 
 // Trace middleware
@@ -29,7 +29,7 @@ type Trace struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *Trace) ServeHandler(h http.Handler) http.Handler {
+func (m Trace) ServeHandler(h http.Handler) http.Handler {
 	if m.Propagation == nil {
 		m.Propagation = &sdpropagation.HTTPFormat{}
 	}

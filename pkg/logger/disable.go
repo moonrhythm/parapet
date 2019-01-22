@@ -8,12 +8,12 @@ import (
 
 // Disable disables log
 func Disable() parapet.Middleware {
-	return new(disable)
+	return disable{}
 }
 
 type disable struct{}
 
-func (m *disable) ServeHandler(h http.Handler) http.Handler {
+func (m disable) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		d := getRecord(ctx)

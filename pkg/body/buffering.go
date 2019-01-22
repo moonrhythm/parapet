@@ -14,15 +14,15 @@ import (
 )
 
 // BufferRequest creates new request bufferer
-func BufferRequest() *RequestBufferer {
-	return &RequestBufferer{}
+func BufferRequest() RequestBufferer {
+	return RequestBufferer{}
 }
 
 // RequestBufferer reads entire request body before send to next middleware
 type RequestBufferer struct{}
 
 // ServeHandler implements middleware interface
-func (m *RequestBufferer) ServeHandler(h http.Handler) http.Handler {
+func (m RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.ContentLength == 0:
@@ -76,7 +76,7 @@ func (m *RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 			r.Body = fp
 			logger.Set(r.Context(), "responseBodySize", r.ContentLength)
 
-			fp.Seek(0, os.SEEK_SET)
+			fp.Seek(0, io.SeekStart)
 		}
 
 		if r.Context().Err() == context.Canceled {

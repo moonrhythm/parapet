@@ -11,7 +11,7 @@ type Authenticator struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *Authenticator) ServeHandler(h http.Handler) http.Handler {
+func (m Authenticator) ServeHandler(h http.Handler) http.Handler {
 	if m.Authenticator == nil {
 		return h
 	}

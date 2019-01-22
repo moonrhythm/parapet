@@ -3,8 +3,8 @@ package headers
 import "net/http"
 
 // SetRequest creates new request setter
-func SetRequest(headerpairs ...string) *RequestSetter {
-	return &RequestSetter{Headers: buildHeaders(headerpairs)}
+func SetRequest(headerpairs ...string) RequestSetter {
+	return RequestSetter{Headers: buildHeaders(headerpairs)}
 }
 
 // RequestSetter sets request headers
@@ -13,7 +13,7 @@ type RequestSetter struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *RequestSetter) ServeHandler(h http.Handler) http.Handler {
+func (m RequestSetter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}
@@ -28,8 +28,8 @@ func (m *RequestSetter) ServeHandler(h http.Handler) http.Handler {
 }
 
 // SetResponse creates new response setter
-func SetResponse(headerpairs ...string) *ResponseSetter {
-	return &ResponseSetter{Headers: buildHeaders(headerpairs)}
+func SetResponse(headerpairs ...string) ResponseSetter {
+	return ResponseSetter{Headers: buildHeaders(headerpairs)}
 }
 
 // ResponseSetter sets response headers
@@ -38,7 +38,7 @@ type ResponseSetter struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *ResponseSetter) ServeHandler(h http.Handler) http.Handler {
+func (m ResponseSetter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}

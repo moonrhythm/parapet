@@ -5,8 +5,8 @@ import (
 )
 
 // HTTPS creates new https redirector
-func HTTPS() *HTTPSRedirector {
-	return &HTTPSRedirector{
+func HTTPS() HTTPSRedirector {
+	return HTTPSRedirector{
 		StatusCode: http.StatusMovedPermanently,
 	}
 }
@@ -17,7 +17,7 @@ type HTTPSRedirector struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *HTTPSRedirector) ServeHandler(h http.Handler) http.Handler {
+func (m HTTPSRedirector) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}

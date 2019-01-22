@@ -8,11 +8,11 @@ import (
 )
 
 // RegExp creates new RegExp matcher
-func RegExp(pattern string) *RegExpMatcher {
-	return &RegExpMatcher{Pattern: pattern}
+func RegExp(pattern string) RegExpMatcher {
+	return RegExpMatcher{Pattern: pattern}
 }
 
-// RegExpMatcher matchs location using regexp
+// RegExpMatcher matches location using regexp
 type RegExpMatcher struct {
 	Pattern string
 	ms      parapet.Middlewares
@@ -24,7 +24,7 @@ func (l *RegExpMatcher) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (l *RegExpMatcher) ServeHandler(h http.Handler) http.Handler {
+func (l RegExpMatcher) ServeHandler(h http.Handler) http.Handler {
 	next := l.ms.ServeHandler(http.NotFoundHandler())
 
 	// catch-all

@@ -29,7 +29,7 @@ func (m *Router) Handle(pattern string, h parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (m *Router) ServeHandler(h http.Handler) http.Handler {
+func (m Router) ServeHandler(h http.Handler) http.Handler {
 	mux := http.NewServeMux()
 
 	if _, ok := m.m["/"]; !ok {

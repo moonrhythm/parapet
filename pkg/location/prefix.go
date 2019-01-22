@@ -8,11 +8,11 @@ import (
 )
 
 // Prefix creates new prefix matcher
-func Prefix(pattern string) *PrefixMatcher {
-	return &PrefixMatcher{Pattern: pattern}
+func Prefix(pattern string) PrefixMatcher {
+	return PrefixMatcher{Pattern: pattern}
 }
 
-// PrefixMatcher matchs location using prefix string
+// PrefixMatcher matches location using prefix string
 type PrefixMatcher struct {
 	Pattern string
 	ms      parapet.Middlewares
@@ -24,7 +24,7 @@ func (l *PrefixMatcher) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (l *PrefixMatcher) ServeHandler(h http.Handler) http.Handler {
+func (l PrefixMatcher) ServeHandler(h http.Handler) http.Handler {
 	next := l.ms.ServeHandler(http.NotFoundHandler())
 
 	// catch-all

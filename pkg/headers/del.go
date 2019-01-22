@@ -3,8 +3,8 @@ package headers
 import "net/http"
 
 // DeleteRequest creates new request deleter
-func DeleteRequest(headers ...string) *RequestDeleter {
-	return &RequestDeleter{Headers: headers}
+func DeleteRequest(headers ...string) RequestDeleter {
+	return RequestDeleter{Headers: headers}
 }
 
 // RequestDeleter deletes request headers
@@ -13,7 +13,7 @@ type RequestDeleter struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *RequestDeleter) ServeHandler(h http.Handler) http.Handler {
+func (m RequestDeleter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}
@@ -28,8 +28,8 @@ func (m *RequestDeleter) ServeHandler(h http.Handler) http.Handler {
 }
 
 // DeleteResponse creates new response deleter
-func DeleteResponse(headers ...string) *ResponseDeleter {
-	return &ResponseDeleter{Headers: headers}
+func DeleteResponse(headers ...string) ResponseDeleter {
+	return ResponseDeleter{Headers: headers}
 }
 
 // ResponseDeleter deletes response headers
@@ -38,7 +38,7 @@ type ResponseDeleter struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *ResponseDeleter) ServeHandler(h http.Handler) http.Handler {
+func (m ResponseDeleter) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}
