@@ -7,11 +7,11 @@ import (
 )
 
 // Exact creates new exact matcher
-func Exact(pattern string) *ExactMatcher {
-	return &ExactMatcher{Pattern: pattern}
+func Exact(pattern string) ExactMatcher {
+	return ExactMatcher{Pattern: pattern}
 }
 
-// ExactMatcher matchs exact location
+// ExactMatcher matches exact location
 type ExactMatcher struct {
 	Pattern string
 	ms      parapet.Middlewares
@@ -23,7 +23,7 @@ func (l *ExactMatcher) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (l *ExactMatcher) ServeHandler(h http.Handler) http.Handler {
+func (l ExactMatcher) ServeHandler(h http.Handler) http.Handler {
 	next := l.ms.ServeHandler(http.NotFoundHandler())
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

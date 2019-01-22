@@ -3,17 +3,17 @@ package h2push
 import "net/http"
 
 // Push pushs a link
-func Push(link string) *LinkPusher {
-	return &LinkPusher{Link: link}
+func Push(link string) LinkPusher {
+	return LinkPusher{Link: link}
 }
 
-// LinkPusher pushs a link
+// LinkPusher pushes a link
 type LinkPusher struct {
 	Link string
 }
 
 // ServeHandler implements middleware interface
-func (m *LinkPusher) ServeHandler(h http.Handler) http.Handler {
+func (m LinkPusher) ServeHandler(h http.Handler) http.Handler {
 	if m.Link == "" {
 		return h
 	}

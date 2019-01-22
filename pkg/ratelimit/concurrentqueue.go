@@ -6,7 +6,7 @@ import (
 )
 
 // ConcurrentQueue creates new concurrent queue rate limiter
-func ConcurrentQueue(capacity, size int) *RateLimiter {
+func ConcurrentQueue(capacity, size int) RateLimiter {
 	return New(&ConcurrentQueueStrategy{
 		Capacity: capacity,
 		Size:     size,

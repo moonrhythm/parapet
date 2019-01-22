@@ -7,16 +7,16 @@ import (
 )
 
 // MapRequest creates new request mapper
-func MapRequest(header string, mapper func(string) string) *RequestMapper {
-	return &RequestMapper{
+func MapRequest(header string, mapper func(string) string) RequestMapper {
+	return RequestMapper{
 		Header: header,
 		Mapper: mapper,
 	}
 }
 
 // MapGCPHLBImmediateIP extracts client ip from gcp hlb
-func MapGCPHLBImmediateIP(proxy int) *RequestMapper {
-	return &RequestMapper{
+func MapGCPHLBImmediateIP(proxy int) RequestMapper {
+	return RequestMapper{
 		Header: "X-Forwarded-For",
 		Mapper: func(s string) string {
 			xs := strings.Split(s, ", ")
@@ -35,7 +35,7 @@ type RequestMapper struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *RequestMapper) ServeHandler(h http.Handler) http.Handler {
+func (m RequestMapper) ServeHandler(h http.Handler) http.Handler {
 	if m.Header == "" || m.Mapper == nil {
 		return h
 	}
@@ -52,8 +52,8 @@ func (m *RequestMapper) ServeHandler(h http.Handler) http.Handler {
 }
 
 // MapResponse creates new response mapper
-func MapResponse(header string, mapper func(string) string) *ResponseMapper {
-	return &ResponseMapper{
+func MapResponse(header string, mapper func(string) string) ResponseMapper {
+	return ResponseMapper{
 		Header: header,
 		Mapper: mapper,
 	}
@@ -66,7 +66,7 @@ type ResponseMapper struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *ResponseMapper) ServeHandler(h http.Handler) http.Handler {
+func (m ResponseMapper) ServeHandler(h http.Handler) http.Handler {
 	if m.Header == "" || m.Mapper == nil {
 		return h
 	}

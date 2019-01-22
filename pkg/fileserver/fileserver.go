@@ -12,12 +12,12 @@ type FileServer struct {
 }
 
 // New creates new file server
-func New(root string) *FileServer {
-	return &FileServer{Root: root}
+func New(root string) FileServer {
+	return FileServer{Root: root}
 }
 
 // ServeHandler implements middleware interface
-func (m *FileServer) ServeHandler(h http.Handler) http.Handler {
+func (m FileServer) ServeHandler(h http.Handler) http.Handler {
 	fs := http.FileServer(&fileSystem{
 		root:    m.Root,
 		listDir: m.ListDirectory,

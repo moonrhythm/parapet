@@ -15,14 +15,14 @@ type ReqID struct {
 }
 
 // New creates default req id middleware
-func New() *ReqID {
-	return &ReqID{
+func New() ReqID {
+	return ReqID{
 		TrustProxy: true,
 	}
 }
 
 // ServeHandler implements middleware interface
-func (m *ReqID) ServeHandler(h http.Handler) http.Handler {
+func (m ReqID) ServeHandler(h http.Handler) http.Handler {
 	if m.Header == "" {
 		m.Header = "X-Request-Id"
 	}

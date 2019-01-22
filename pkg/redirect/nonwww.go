@@ -6,8 +6,8 @@ import (
 )
 
 // NonWWW creates new non www redirector
-func NonWWW() *NonWWWRedirector {
-	return &NonWWWRedirector{
+func NonWWW() NonWWWRedirector {
+	return NonWWWRedirector{
 		StatusCode: http.StatusMovedPermanently,
 	}
 }
@@ -18,7 +18,7 @@ type NonWWWRedirector struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *NonWWWRedirector) ServeHandler(h http.Handler) http.Handler {
+func (m NonWWWRedirector) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}

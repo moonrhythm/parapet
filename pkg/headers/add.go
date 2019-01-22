@@ -3,8 +3,8 @@ package headers
 import "net/http"
 
 // AddRequest creates request adder
-func AddRequest(headerpairs ...string) *RequestAdder {
-	return &RequestAdder{Headers: buildHeaders(headerpairs)}
+func AddRequest(headerpairs ...string) RequestAdder {
+	return RequestAdder{Headers: buildHeaders(headerpairs)}
 }
 
 // RequestAdder adds request headers
@@ -13,7 +13,7 @@ type RequestAdder struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *RequestAdder) ServeHandler(h http.Handler) http.Handler {
+func (m RequestAdder) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}
@@ -38,7 +38,7 @@ type ResponseAdder struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *ResponseAdder) ServeHandler(h http.Handler) http.Handler {
+func (m ResponseAdder) ServeHandler(h http.Handler) http.Handler {
 	if len(m.Headers) == 0 {
 		return h
 	}

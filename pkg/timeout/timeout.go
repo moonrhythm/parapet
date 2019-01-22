@@ -8,8 +8,8 @@ import (
 )
 
 // New creates timeout middleware
-func New(timeout time.Duration) *Timout {
-	return &Timout{Timeout: timeout}
+func New(timeout time.Duration) Timout {
+	return Timout{Timeout: timeout}
 }
 
 // Timout sets a write header timeout
@@ -19,7 +19,7 @@ type Timout struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *Timout) ServeHandler(h http.Handler) http.Handler {
+func (m Timout) ServeHandler(h http.Handler) http.Handler {
 	if m.Timeout <= 0 {
 		return h
 	}

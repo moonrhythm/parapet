@@ -29,7 +29,7 @@ const (
 )
 
 // ServeHandler implements middleware interface
-func (m *Compress) ServeHandler(h http.Handler) http.Handler {
+func (m Compress) ServeHandler(h http.Handler) http.Handler {
 	mapTypes := make(map[string]struct{})
 	for _, t := range strings.Split(m.Types, " ") {
 		mapTypes[t] = struct{}{}

@@ -42,14 +42,14 @@ func (m *Upstream) logf(format string, v ...interface{}) {
 }
 
 // ServeHandler implements middleware interface
-func (m *Upstream) ServeHandler(h http.Handler) http.Handler {
+func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 	target, err := url.Parse(m.Target)
 	if err != nil {
 		panic(err)
 	}
 
 	targetQuery := target.RawQuery
-	p := &httputil.ReverseProxy{
+	p := httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 

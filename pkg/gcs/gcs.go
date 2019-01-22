@@ -15,8 +15,8 @@ import (
 )
 
 // New creates new gcs backend
-func New(client *storage.Client, bucket string, basePath string) *GCS {
-	return &GCS{
+func New(client *storage.Client, bucket string, basePath string) GCS {
+	return GCS{
 		Client:   client,
 		Bucket:   bucket,
 		BasePath: basePath,
@@ -32,7 +32,7 @@ type GCS struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *GCS) ServeHandler(h http.Handler) http.Handler {
+func (m GCS) ServeHandler(h http.Handler) http.Handler {
 	// default fallback
 	if m.Fallback == nil {
 		m.Fallback = http.NotFoundHandler()

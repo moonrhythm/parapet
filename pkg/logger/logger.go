@@ -17,23 +17,23 @@ type Logger struct {
 }
 
 // Stdout creates new stdout logger
-func Stdout() *Logger {
-	return &Logger{
+func Stdout() Logger {
+	return Logger{
 		Writer:    os.Stdout,
 		OmitEmpty: true,
 	}
 }
 
 // Stderr creates new stderr logger
-func Stderr() *Logger {
-	return &Logger{
+func Stderr() Logger {
+	return Logger{
 		Writer:    os.Stderr,
 		OmitEmpty: true,
 	}
 }
 
 // ServeHandler implements middleware interface
-func (m *Logger) ServeHandler(h http.Handler) http.Handler {
+func (m Logger) ServeHandler(h http.Handler) http.Handler {
 	if m.Writer == nil {
 		m.Writer = os.Stdout
 	}

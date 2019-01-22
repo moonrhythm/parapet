@@ -5,8 +5,8 @@ import (
 )
 
 // To redirects to target
-func To(target string, statusCode int) *Redirector {
-	return &Redirector{
+func To(target string, statusCode int) Redirector {
+	return Redirector{
 		Target:     target,
 		StatusCode: statusCode,
 	}
@@ -19,7 +19,7 @@ type Redirector struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *Redirector) ServeHandler(h http.Handler) http.Handler {
+func (m Redirector) ServeHandler(h http.Handler) http.Handler {
 	if m.StatusCode == 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}

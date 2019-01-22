@@ -23,13 +23,13 @@ type BasicAuthenticator struct {
 }
 
 // ServeHandler implements middleware interface
-func (m *BasicAuthenticator) ServeHandler(h http.Handler) http.Handler {
+func (m BasicAuthenticator) ServeHandler(h http.Handler) http.Handler {
 	t := "Basic"
 	if m.Realm != "" {
 		t += " realm=\"" + url.PathEscape(m.Realm) + "\""
 	}
 
-	return (&Authenticator{
+	return Authenticator{
 		Type: t,
 		Authenticator: func(r *http.Request) bool {
 			username, password, ok := r.BasicAuth()
@@ -38,5 +38,5 @@ func (m *BasicAuthenticator) ServeHandler(h http.Handler) http.Handler {
 			}
 			return m.Authenticator(username, password)
 		},
-	}).ServeHandler(h)
+	}.ServeHandler(h)
 }

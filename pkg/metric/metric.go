@@ -16,7 +16,7 @@ func Set(key string, value interface{}) {
 	mu.Unlock()
 }
 
-// Incr inceases state by delta
+// Incr increases state by delta
 func Incr(key string, delta int64) {
 	mu.Lock()
 	curr, _ := state[key].(int64)
