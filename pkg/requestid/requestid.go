@@ -1,4 +1,4 @@
-package reqid
+package requestid
 
 import (
 	"net/http"
@@ -8,23 +8,29 @@ import (
 	"github.com/moonrhythm/parapet/pkg/logger"
 )
 
-// ReqID middleware
-type ReqID struct {
+// RequestID middleware
+type RequestID struct {
+	// TrustProxy trusts request id from request header
+	// sets to false to always generate new request id
 	TrustProxy bool
+
+	// Header is the http header key
 	Header     string
 }
 
 // New creates default req id middleware
-func New() ReqID {
-	return ReqID{
+func New() RequestID {
+	return RequestID{
 		TrustProxy: true,
 	}
 }
 
+const DefaultHeader = "X-Request-Id"
+
 // ServeHandler implements middleware interface
-func (m ReqID) ServeHandler(h http.Handler) http.Handler {
+func (m RequestID) ServeHandler(h http.Handler) http.Handler {
 	if m.Header == "" {
-		m.Header = "X-Request-Id"
+		m.Header = DefaultHeader
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
