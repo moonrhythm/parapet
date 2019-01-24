@@ -1,5 +1,7 @@
 # parapet
 
+[![Build Status](https://travis-ci.org/moonrhythm/parapet.svg?branch=master)](https://travis-ci.org/moonrhythm/parapet)
+[![codecov](https://codecov.io/gh/moonrhythm/parapet/branch/master/graph/badge.svg)](https://codecov.io/gh/moonrhythm/parapet)
 [![Go Report Card](https://goreportcard.com/badge/github.com/moonrhythm/parapet)](https://goreportcard.com/report/github.com/moonrhythm/parapet)
 [![GoDoc](https://godoc.org/github.com/moonrhythm/parapet?status.svg)](https://godoc.org/github.com/moonrhythm/parapet)
 
@@ -25,7 +27,7 @@ import (
     "github.com/moonrhythm/parapet/pkg/location"
     "github.com/moonrhythm/parapet/pkg/logger"
     "github.com/moonrhythm/parapet/pkg/ratelimit"
-    "github.com/moonrhythm/parapet/pkg/reqid"
+    "github.com/moonrhythm/parapet/pkg/requestid"
     "github.com/moonrhythm/parapet/pkg/redirect"
     "github.com/moonrhythm/parapet/pkg/upstream"
 )
@@ -33,7 +35,7 @@ import (
 func main() {
     s := parapet.New()
     s.Use(logger.Stdout())
-    s.Use(reqid.New())
+    s.Use(requestid.New())
     s.Use(ratelimit.FixedWindowPerSecond(60))
     s.Use(ratelimit.FixedWindowPerMinute(300))
     s.Use(ratelimit.FixedWindowPerHour(2000))
@@ -133,7 +135,3 @@ func wordpress() parapet.Middleware {
 ## License
 
 MIT
-
-## Request new feature ?
-
-Hire us!!! contact@moonrhythm.io
