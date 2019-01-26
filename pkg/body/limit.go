@@ -48,7 +48,7 @@ func (m RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 		body := r.Body
 
 		k := m.Size
-		r.Body = &readCloser{
+		r.Body = readCloser{
 			readerFunc: func(p []byte) (n int, err error) {
 				if k <= 0 {
 					err = io.EOF
@@ -78,6 +78,6 @@ type readCloser struct {
 	io.Closer
 }
 
-func (r *readCloser) Read(p []byte) (int, error) {
+func (r readCloser) Read(p []byte) (int, error) {
 	return r.readerFunc(p)
 }
