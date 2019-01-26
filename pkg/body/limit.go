@@ -31,9 +31,14 @@ func (m RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// case 1: content length
-		if r.ContentLength > m.Size {
-			m.LimitedHandler.ServeHTTP(w, r)
+		// case 1: known body size
+		if r.ContentLength >= 0 {
+			if r.ContentLength > m.Size {
+				m.LimitedHandler.ServeHTTP(w, r)
+				return
+			}
+
+			h.ServeHTTP(w, r)
 			return
 		}
 
@@ -44,7 +49,7 @@ func (m RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 
 		k := m.Size
 		r.Body = readCloser{
-			Reader: readerFunc(func(p []byte) (n int, err error) {
+			readerFunc: func(p []byte) (n int, err error) {
 				if k <= 0 {
 					err = io.EOF
 
@@ -60,7 +65,7 @@ func (m RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 				n, err = body.Read(p)
 				k -= int64(n)
 				return
-			}),
+			},
 			Closer: body,
 		}
 
@@ -69,12 +74,10 @@ func (m RequestLimiter) ServeHandler(h http.Handler) http.Handler {
 }
 
 type readCloser struct {
-	io.Reader
+	readerFunc func(p []byte) (int, error)
 	io.Closer
 }
 
-type readerFunc func(p []byte) (int, error)
-
-func (f readerFunc) Read(p []byte) (int, error) {
-	return f(p)
+func (r readCloser) Read(p []byte) (int, error) {
+	return r.readerFunc(p)
 }
