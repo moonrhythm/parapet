@@ -10,14 +10,14 @@ import (
 	. "github.com/moonrhythm/parapet/pkg/headers"
 )
 
-func TestRequestSetter(t *testing.T) {
+func TestRequestAdder(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Empty", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		called := false
-		SetRequest().ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		AddRequest().ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
 		})).ServeHTTP(w, r)
 		assert.True(t, called)
@@ -27,22 +27,25 @@ func TestRequestSetter(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		called := false
-		SetRequest("X-Header", "1").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		AddRequest("X-Header", "1", "X-Header", "2").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
-			assert.Equal(t, "1", r.Header.Get("X-Header"))
+			if assert.Len(t, r.Header["X-Header"], 2) {
+				assert.Equal(t, "1", r.Header["X-Header"][0])
+				assert.Equal(t, "2", r.Header["X-Header"][1])
+			}
 		})).ServeHTTP(w, r)
 		assert.True(t, called)
 	})
 }
 
-func TestResponseSetter(t *testing.T) {
+func TestResponseAdder(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Empty", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		called := false
-		SetResponse().ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		AddResponse().ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
 			w.WriteHeader(http.StatusOK)
 		})).ServeHTTP(w, r)
@@ -53,22 +56,25 @@ func TestResponseSetter(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		called := false
-		SetResponse("X-Header", "1").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		AddResponse("X-Header", "1", "X-Header", "2").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
 			w.Header().Set("X-Header", "0")
 			w.WriteHeader(http.StatusOK)
 		})).ServeHTTP(w, r)
 		assert.True(t, called)
-		assert.Equal(t, "1", w.Header().Get("X-Header"))
+		if assert.Len(t, w.Header()["X-Header"], 3) {
+			assert.Equal(t, "0", w.Header()["X-Header"][0])
+			assert.Equal(t, "1", w.Header()["X-Header"][1])
+			assert.Equal(t, "2", w.Header()["X-Header"][2])
+		}
 	})
 
 	t.Run("Double call write header", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		called := false
-		SetResponse("X-Header", "1").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		AddResponse("X-Header", "1").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
-			w.Header().Set("X-Header", "0")
 			w.WriteHeader(http.StatusOK)
 			w.WriteHeader(http.StatusNotFound)
 		})).ServeHTTP(w, r)
@@ -81,9 +87,8 @@ func TestResponseSetter(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
 		called := false
-		SetResponse("X-Header", "1").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		AddResponse("X-Header", "1").ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			called = true
-			w.Header().Set("X-Header", "0")
 			w.Write([]byte("test"))
 		})).ServeHTTP(w, r)
 		assert.True(t, called)
