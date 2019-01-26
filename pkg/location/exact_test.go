@@ -14,51 +14,46 @@ import (
 func TestExactMatcher(t *testing.T) {
 	t.Parallel()
 
-	t.Run("Matched", func(t *testing.T) {
-		m := Exact("/path1")
-		r := httptest.NewRequest("GET", "/path1", nil)
-		w := httptest.NewRecorder()
-		called := false
-		m.Use(parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called = true
-			})
-		}))
-		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Fail(t, "should not be called")
-		})).ServeHTTP(w, r)
-		assert.True(t, called)
-	})
+	cases := []struct {
+		Name    string
+		Prefix  string
+		Path    string
+		Matched bool
+	}{
+		{"Exact Matched", "/path1", "/path1", true},
+		{"Unmatched", "/path1", "/path", false},
+		{"Unmatched with suffix", "/path1", "/path1/", false},
+	}
 
-	t.Run("Unmatched", func(t *testing.T) {
-		m := Exact("/path1")
-		r := httptest.NewRequest("GET", "/path", nil)
-		w := httptest.NewRecorder()
-		called := false
-		m.Use(parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Fail(t, "should not be called")
-			})
-		}))
-		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = true
-		})).ServeHTTP(w, r)
-		assert.True(t, called)
-	})
+	for _, c := range cases {
+		t.Run(c.Name, func(t *testing.T) {
+			m := Exact(c.Prefix)
+			r := httptest.NewRequest("GET", c.Path, nil)
+			w := httptest.NewRecorder()
 
-	t.Run("Unmatched with suffix", func(t *testing.T) {
-		m := Exact("/path1")
-		r := httptest.NewRequest("GET", "/path1/", nil)
-		w := httptest.NewRecorder()
-		called := false
-		m.Use(parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
-			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Fail(t, "should not be called")
-			})
-		}))
-		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			called = true
-		})).ServeHTTP(w, r)
-		assert.True(t, called)
-	})
+			if c.Matched {
+				called := false
+				m.Use(parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						called = true
+					})
+				}))
+				m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					assert.Fail(t, "should not be called")
+				})).ServeHTTP(w, r)
+				assert.True(t, called)
+			} else {
+				called := false
+				m.Use(parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
+					return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						assert.Fail(t, "should not be called")
+					})
+				}))
+				m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					called = true
+				})).ServeHTTP(w, r)
+				assert.True(t, called)
+			}
+		})
+	}
 }
