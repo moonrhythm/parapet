@@ -20,7 +20,7 @@ func TestExactMatcher(t *testing.T) {
 		Path    string
 		Matched bool
 	}{
-		{"Exact Matched", "/path1", "/path1", true},
+		{"Matched", "/path1", "/path1", true},
 		{"Unmatched", "/path1", "/path", false},
 		{"Unmatched with suffix", "/path1", "/path1/", false},
 	}
