@@ -13,6 +13,14 @@ type Middleware interface {
 	ServeHandler(http.Handler) http.Handler
 }
 
+// MiddlewareFunc is the adapter type for Middleware
+type MiddlewareFunc func(http.Handler) http.Handler
+
+// ServeHandler calls f
+func (f MiddlewareFunc) ServeHandler(h http.Handler) http.Handler {
+	return f(h)
+}
+
 // Middlewares type
 type Middlewares []Middleware
 
