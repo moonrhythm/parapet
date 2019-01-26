@@ -46,14 +46,14 @@ func (m ResponseDeleter) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.ServeHTTP(&responseDeleterRW{
 			ResponseWriter: w,
-			hide:           m.Headers,
+			headers:        m.Headers,
 		}, r)
 	})
 }
 
 type responseDeleterRW struct {
 	http.ResponseWriter
-	hide        []string
+	headers     []string
 	wroteHeader bool
 }
 
@@ -62,7 +62,7 @@ func (w *responseDeleterRW) WriteHeader(statusCode int) {
 		return
 	}
 	w.wroteHeader = true
-	for _, h := range w.hide {
+	for _, h := range w.headers {
 		w.Header().Del(h)
 	}
 	w.ResponseWriter.WriteHeader(statusCode)

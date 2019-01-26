@@ -20,7 +20,7 @@ func (m RequestSetter) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		for _, p := range m.Headers {
-			r.Header.Add(p.Key, p.Value)
+			r.Header.Set(p.Key, p.Value)
 		}
 
 		h.ServeHTTP(w, r)
@@ -44,10 +44,34 @@ func (m ResponseSetter) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, p := range m.Headers {
-			w.Header().Add(p.Key, p.Value)
-		}
-
-		h.ServeHTTP(w, r)
+		h.ServeHTTP(&responseSetterRW{
+			ResponseWriter: w,
+			headers:        m.Headers,
+		}, r)
 	})
+}
+
+type responseSetterRW struct {
+	http.ResponseWriter
+	headers     []Header
+	wroteHeader bool
+}
+
+func (w *responseSetterRW) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	for _, p := range w.headers {
+		w.Header().Set(p.Key, p.Value)
+	}
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (w *responseSetterRW) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+
+	return w.ResponseWriter.Write(p)
 }
