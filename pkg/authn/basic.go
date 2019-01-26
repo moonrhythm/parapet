@@ -9,7 +9,7 @@ import (
 // Basic creates new basic auth middleware
 func Basic(username, password string) *BasicAuthenticator {
 	return &BasicAuthenticator{
-		Authenticator: func(u, p string) bool {
+		Authenticate: func(u, p string) bool {
 			return u == username &&
 				subtle.ConstantTimeCompare([]byte(p), []byte(password)) == 1
 		},
@@ -18,8 +18,8 @@ func Basic(username, password string) *BasicAuthenticator {
 
 // BasicAuthenticator middleware
 type BasicAuthenticator struct {
-	Realm         string
-	Authenticator func(username, password string) bool
+	Realm        string
+	Authenticate func(username, password string) bool
 }
 
 // ServeHandler implements middleware interface
@@ -31,12 +31,12 @@ func (m BasicAuthenticator) ServeHandler(h http.Handler) http.Handler {
 
 	return Authenticator{
 		Type: t,
-		Authenticator: func(r *http.Request) bool {
+		Authenticate: func(r *http.Request) bool {
 			username, password, ok := r.BasicAuth()
 			if !ok {
 				return false
 			}
-			return m.Authenticator(username, password)
+			return m.Authenticate(username, password)
 		},
 	}.ServeHandler(h)
 }
