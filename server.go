@@ -124,7 +124,11 @@ func (s *Server) trackConnState() {
 func (s *Server) configHandler() {
 	s.once.Do(func() {
 		h := s.ms.ServeHandler(s.Handler)
-		h = trustProxy{s.TrustProxy}.ServeHandler(h)
+		if s.TrustProxy {
+			h = trustProxy{}.ServeHandler(h)
+		} else {
+			h = untrustProxy{}.ServeHandler(h)
+		}
 		if s.H2C {
 			h2s := &http2.Server{}
 			h = h2c.NewHandler(h, h2s)

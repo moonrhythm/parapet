@@ -181,14 +181,6 @@ func (w *compressWriter) Flush() {
 	}
 }
 
-// CloseNotify implements CloseNotifier interface
-func (w *compressWriter) CloseNotify() <-chan bool {
-	if w, ok := w.ResponseWriter.(http.CloseNotifier); ok {
-		return w.CloseNotify()
-	}
-	return nil
-}
-
 // Hijack implements Hijacker interface
 func (w *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if w, ok := w.ResponseWriter.(http.Hijacker); ok {

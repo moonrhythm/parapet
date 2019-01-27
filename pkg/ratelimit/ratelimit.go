@@ -44,13 +44,13 @@ func defaultExceededHandler(w http.ResponseWriter, r *http.Request, after time.D
 	http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 }
 
-func defaultKey(*http.Request) string {
+func defaultKey(_ *http.Request) string {
 	return ""
 }
 
 // ClientIP returns client ip from request
 func ClientIP(r *http.Request) string {
-	ipStr := r.Header.Get("X-Forwarded-For")
+	ipStr := r.Header.Get("X-Real-Ip")
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return ipStr
