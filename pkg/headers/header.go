@@ -8,10 +8,10 @@ type Header struct {
 
 func buildHeaders(pairs []string) []Header {
 	var hs []Header
-	for i := 0; i < len(pairs); i += 2 {
+	for i := 1; i < len(pairs); i += 2 {
 		hs = append(hs, Header{
-			Key:   pairs[i],
-			Value: pairs[i+1],
+			Key:   pairs[i-1],
+			Value: pairs[i],
 		})
 	}
 	return hs
