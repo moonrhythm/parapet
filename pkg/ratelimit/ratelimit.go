@@ -37,7 +37,7 @@ type Strategy interface {
 // ExceededHandler type
 type ExceededHandler func(w http.ResponseWriter, r *http.Request, after time.Duration)
 
-func defaultExceededHandler(w http.ResponseWriter, r *http.Request, after time.Duration) {
+func defaultExceededHandler(w http.ResponseWriter, _ *http.Request, after time.Duration) {
 	if after > 0 {
 		w.Header().Set("Retry-After", strconv.FormatInt(int64(after/time.Second), 10))
 	}
