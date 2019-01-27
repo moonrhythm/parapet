@@ -24,7 +24,7 @@ type Compress struct {
 // default values
 const (
 	defaultCompressVary      = true
-	defaultCompressTypes     = "text/plain text/html text/css text/xml text/javascript application/x-javascript application/xml"
+	defaultCompressTypes     = "application/xml+rss application/atom+xml application/javascript application/x-javascript application/json application/rss+xml application/vnd.ms-fontobject application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/svg+xml image/x-icon text/css text/html text/plain text/x-component"
 	defaultCompressMinLength = 860
 )
 
@@ -32,6 +32,10 @@ const (
 func (m Compress) ServeHandler(h http.Handler) http.Handler {
 	mapTypes := make(map[string]struct{})
 	for _, t := range strings.Split(m.Types, " ") {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
 		mapTypes[t] = struct{}{}
 	}
 
