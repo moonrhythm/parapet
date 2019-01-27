@@ -2,76 +2,24 @@ package headers
 
 import "net/http"
 
-// AddRequest creates request adder
-func AddRequest(headerpairs ...string) RequestAdder {
-	return RequestAdder{Headers: buildHeaders(headerpairs)}
-}
+// AddRequest creates new request interceptor for add headers
+func AddRequest(headerpairs ...string) RequestInterceptor {
+	hs := buildHeaders(headerpairs)
 
-// RequestAdder adds request headers
-type RequestAdder struct {
-	Headers []Header
-}
-
-// ServeHandler implements middleware interface
-func (m RequestAdder) ServeHandler(h http.Handler) http.Handler {
-	if len(m.Headers) == 0 {
-		return h
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for _, p := range m.Headers {
-			r.Header.Add(p.Key, p.Value)
+	return InterceptRequest(func(h http.Header) {
+		for _, p := range hs {
+			h.Add(p.Key, p.Value)
 		}
-
-		h.ServeHTTP(w, r)
 	})
 }
 
-// AddResponse creates new response adder
-func AddResponse(headerpairs ...string) *ResponseAdder {
-	return &ResponseAdder{Headers: buildHeaders(headerpairs)}
-}
+// AddResponse creates new response interceptor for add headers
+func AddResponse(headerpairs ...string) ResponseInterceptor {
+	hs := buildHeaders(headerpairs)
 
-// ResponseAdder adds response headers
-type ResponseAdder struct {
-	Headers []Header
-}
-
-// ServeHandler implements middleware interface
-func (m ResponseAdder) ServeHandler(h http.Handler) http.Handler {
-	if len(m.Headers) == 0 {
-		return h
-	}
-
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.ServeHTTP(&responseAdderRW{
-			ResponseWriter: w,
-			headers:        m.Headers,
-		}, r)
+	return InterceptResponse(func(h http.Header) {
+		for _, p := range hs {
+			h.Add(p.Key, p.Value)
+		}
 	})
-}
-
-type responseAdderRW struct {
-	http.ResponseWriter
-	headers     []Header
-	wroteHeader bool
-}
-
-func (w *responseAdderRW) WriteHeader(statusCode int) {
-	if w.wroteHeader {
-		return
-	}
-	w.wroteHeader = true
-	for _, p := range w.headers {
-		w.Header().Add(p.Key, p.Value)
-	}
-	w.ResponseWriter.WriteHeader(statusCode)
-}
-
-func (w *responseAdderRW) Write(p []byte) (int, error) {
-	if !w.wroteHeader {
-		w.WriteHeader(http.StatusOK)
-	}
-
-	return w.ResponseWriter.Write(p)
 }
