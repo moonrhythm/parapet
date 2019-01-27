@@ -41,6 +41,9 @@ func (host CIDR) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requestHost, _, _ := net.SplitHostPort(r.Host)
+		if requestHost == "" {
+			requestHost = r.Host
+		}
 		ip := net.ParseIP(requestHost)
 		if ip == nil {
 			h.ServeHTTP(w, r)
