@@ -7,6 +7,8 @@ import (
 )
 
 func TestBuildHeaders(t *testing.T) {
+	t.Parallel()
+
 	t.Run("Nil", func(t *testing.T) {
 		hs := buildHeaders(nil)
 		assert.Len(t, hs, 0)

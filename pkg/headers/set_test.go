@@ -10,7 +10,7 @@ import (
 	. "github.com/moonrhythm/parapet/pkg/headers"
 )
 
-func TestRequestSetter(t *testing.T) {
+func TestSetRequest(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Empty", func(t *testing.T) {
@@ -35,7 +35,7 @@ func TestRequestSetter(t *testing.T) {
 	})
 }
 
-func TestResponseSetter(t *testing.T) {
+func TestSetResponse(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Empty", func(t *testing.T) {
