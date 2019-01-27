@@ -41,7 +41,8 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		proto := r.Header.Get("X-Forwarded-Proto")
-		realIP := r.Header.Get("X-Forwarded-For")
+		realIP := r.Header.Get("X-Real-Ip")
+		xff := r.Header.Get("X-Forwarded-For")
 		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
 		d := newRecord()
@@ -54,6 +55,7 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 		d.Set("userAgent", r.UserAgent())
 		d.Set("remoteIp", remoteIP)
 		d.Set("realIp", realIP)
+		d.Set("forwardedFor", xff)
 
 		nw := responseWriter{ResponseWriter: w}
 		defer func() {
