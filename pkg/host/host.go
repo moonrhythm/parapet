@@ -46,9 +46,18 @@ func (host Host) ServeHandler(h http.Handler) http.Handler {
 		}
 
 		// wildcard subdomains
-		if i := strings.Index(r.Host, "."); i > 0 && hostMap["*"+r.Host[i:]] {
-			next.ServeHTTP(w, r)
-			return
+		host := r.Host
+		for host != "" {
+			i := strings.Index(host, ".")
+			if i <= 0 {
+				break
+			}
+
+			if hostMap["*"+host[i:]] {
+				next.ServeHTTP(w, r)
+				return
+			}
+			host = host[i+1:]
 		}
 
 		h.ServeHTTP(w, r)
