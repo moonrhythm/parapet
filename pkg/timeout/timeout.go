@@ -8,8 +8,8 @@ import (
 )
 
 // New creates timeout middleware
-func New(timeout time.Duration) Timout {
-	return Timout{Timeout: timeout}
+func New(timeout time.Duration) *Timout {
+	return &Timout{Timeout: timeout}
 }
 
 // Timout sets a write header timeout

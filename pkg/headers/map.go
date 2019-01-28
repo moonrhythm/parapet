@@ -6,7 +6,7 @@ import (
 )
 
 // MapRequest creates new request interceptor for map a header
-func MapRequest(header string, mapper func(string) string) RequestInterceptor {
+func MapRequest(header string, mapper func(string) string) *RequestInterceptor {
 	header = textproto.CanonicalMIMEHeaderKey(header)
 
 	return InterceptRequest(func(h http.Header) {
@@ -17,7 +17,7 @@ func MapRequest(header string, mapper func(string) string) RequestInterceptor {
 }
 
 // MapResponse creates new response interceptor for map a header
-func MapResponse(header string, mapper func(string) string) ResponseInterceptor {
+func MapResponse(header string, mapper func(string) string) *ResponseInterceptor {
 	header = textproto.CanonicalMIMEHeaderKey(header)
 
 	return InterceptResponse(func(h http.Header) {

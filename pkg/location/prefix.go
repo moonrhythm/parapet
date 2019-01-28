@@ -8,8 +8,8 @@ import (
 )
 
 // Prefix creates new prefix matcher
-func Prefix(pattern string) PrefixMatcher {
-	return PrefixMatcher{Pattern: pattern}
+func Prefix(pattern string) *PrefixMatcher {
+	return &PrefixMatcher{Pattern: pattern}
 }
 
 // PrefixMatcher matches location using prefix string

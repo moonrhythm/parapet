@@ -14,8 +14,8 @@ import (
 )
 
 // BufferRequest creates new request bufferer
-func BufferRequest() RequestBufferer {
-	return RequestBufferer{}
+func BufferRequest() *RequestBufferer {
+	return &RequestBufferer{}
 }
 
 // RequestBufferer reads entire request body before send to next middleware

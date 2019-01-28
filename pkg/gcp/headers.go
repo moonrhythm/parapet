@@ -8,7 +8,7 @@ import (
 )
 
 // HLBImmediateIP extracts client ip from gcp hlb and set to X-Real-Ip
-func HLBImmediateIP(proxy int) headers.RequestInterceptor {
+func HLBImmediateIP(proxy int) *headers.RequestInterceptor {
 	if proxy < 0 {
 		proxy = 0
 	}

@@ -6,7 +6,7 @@ import (
 )
 
 // LeakyBucket creates new leaky bucket rate limiter
-func LeakyBucket(perRequest time.Duration, size int) RateLimiter {
+func LeakyBucket(perRequest time.Duration, size int) *RateLimiter {
 	return New(&LeakyBucketStrategy{
 		PerRequest: perRequest,
 		Size:       size,

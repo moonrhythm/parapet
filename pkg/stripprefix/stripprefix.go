@@ -8,8 +8,8 @@ type StripPrefix struct {
 }
 
 // New creates new strip prefix middleware
-func New(prefix string) StripPrefix {
-	return StripPrefix{Prefix: prefix}
+func New(prefix string) *StripPrefix {
+	return &StripPrefix{Prefix: prefix}
 }
 
 // ServeHandler implements middleware interface

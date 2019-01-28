@@ -8,8 +8,8 @@ import (
 )
 
 // New creates new rate limiter
-func New(strategy Strategy) RateLimiter {
-	return RateLimiter{
+func New(strategy Strategy) *RateLimiter {
+	return &RateLimiter{
 		Key:      ClientIP,
 		Strategy: strategy,
 	}

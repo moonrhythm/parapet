@@ -5,8 +5,8 @@ import (
 )
 
 // To redirects to target
-func To(target string, statusCode int) Redirector {
-	return Redirector{
+func To(target string, statusCode int) *Redirector {
+	return &Redirector{
 		Target:     target,
 		StatusCode: statusCode,
 	}

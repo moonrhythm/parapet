@@ -13,8 +13,8 @@ import (
 )
 
 // New creates new trace middleware
-func New() Trace {
-	return Trace{}
+func New() *Trace {
+	return new(Trace)
 }
 
 // Trace middleware

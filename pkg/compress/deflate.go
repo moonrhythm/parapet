@@ -6,8 +6,8 @@ import (
 )
 
 // Deflate creates new deflate compress middleware
-func Deflate() Compress {
-	return Compress{
+func Deflate() *Compress {
+	return &Compress{
 		New: func() Compressor {
 			g, err := flate.NewWriter(ioutil.Discard, flate.DefaultCompression)
 			if err != nil {

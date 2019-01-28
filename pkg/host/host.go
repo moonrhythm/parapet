@@ -8,8 +8,8 @@ import (
 )
 
 // New creates new host middleware
-func New(host ...string) Host {
-	return Host{Hosts: host}
+func New(host ...string) *Host {
+	return &Host{Hosts: host}
 }
 
 // Host middleware

@@ -3,8 +3,8 @@ package headers
 import "net/http"
 
 // InterceptRequest creates new request interceptor
-func InterceptRequest(f func(http.Header)) RequestInterceptor {
-	return RequestInterceptor{Intercept: f}
+func InterceptRequest(f func(http.Header)) *RequestInterceptor {
+	return &RequestInterceptor{Intercept: f}
 }
 
 // RequestInterceptor intercepts request's headers
@@ -25,8 +25,8 @@ func (m RequestInterceptor) ServeHandler(h http.Handler) http.Handler {
 }
 
 // InterceptResponse creates new response interceptor
-func InterceptResponse(f func(http.Header)) ResponseInterceptor {
-	return ResponseInterceptor{Intercept: f}
+func InterceptResponse(f func(http.Header)) *ResponseInterceptor {
+	return &ResponseInterceptor{Intercept: f}
 }
 
 // ResponseInterceptor intercepts response's headers

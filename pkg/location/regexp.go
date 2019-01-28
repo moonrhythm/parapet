@@ -8,8 +8,8 @@ import (
 )
 
 // RegExp creates new RegExp matcher
-func RegExp(pattern string) RegExpMatcher {
-	return RegExpMatcher{Pattern: pattern}
+func RegExp(pattern string) *RegExpMatcher {
+	return &RegExpMatcher{Pattern: pattern}
 }
 
 // RegExpMatcher matches location using regexp

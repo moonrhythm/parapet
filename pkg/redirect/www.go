@@ -6,8 +6,8 @@ import (
 )
 
 // WWW creates new www redirector
-func WWW() WWWRedirector {
-	return WWWRedirector{
+func WWW() *WWWRedirector {
+	return &WWWRedirector{
 		StatusCode: http.StatusMovedPermanently,
 	}
 }

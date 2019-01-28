@@ -6,8 +6,8 @@ import "net/http"
 type Healthz struct{}
 
 // New creates new healthz
-func New() Healthz {
-	return Healthz{}
+func New() *Healthz {
+	return new(Healthz)
 }
 
 // ServeHandler implements middleware interface

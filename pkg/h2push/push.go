@@ -3,8 +3,8 @@ package h2push
 import "net/http"
 
 // Push pushs a link
-func Push(link string) LinkPusher {
-	return LinkPusher{Link: link}
+func Push(link string) *LinkPusher {
+	return &LinkPusher{Link: link}
 }
 
 // LinkPusher pushes a link

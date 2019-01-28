@@ -3,7 +3,7 @@ package headers
 import "net/http"
 
 // AddRequest creates new request interceptor for add headers
-func AddRequest(headerpairs ...string) RequestInterceptor {
+func AddRequest(headerpairs ...string) *RequestInterceptor {
 	hs := buildHeaders(headerpairs)
 
 	return InterceptRequest(func(h http.Header) {
@@ -14,7 +14,7 @@ func AddRequest(headerpairs ...string) RequestInterceptor {
 }
 
 // AddResponse creates new response interceptor for add headers
-func AddResponse(headerpairs ...string) ResponseInterceptor {
+func AddResponse(headerpairs ...string) *ResponseInterceptor {
 	hs := buildHeaders(headerpairs)
 
 	return InterceptResponse(func(h http.Header) {

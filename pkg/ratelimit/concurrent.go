@@ -6,7 +6,7 @@ import (
 )
 
 // Concurrent creates new concurrent rate limiter
-func Concurrent(capacity int) RateLimiter {
+func Concurrent(capacity int) *RateLimiter {
 	return New(&ConcurrentStrategy{
 		Capacity: capacity,
 	})

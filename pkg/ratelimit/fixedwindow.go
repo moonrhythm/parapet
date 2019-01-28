@@ -6,7 +6,7 @@ import (
 )
 
 // FixedWindow creates new fixed window rate limiter
-func FixedWindow(rate int, unit time.Duration) RateLimiter {
+func FixedWindow(rate int, unit time.Duration) *RateLimiter {
 	return New(&FixedWindowStrategy{
 		Max:  rate,
 		Size: unit,
@@ -14,17 +14,17 @@ func FixedWindow(rate int, unit time.Duration) RateLimiter {
 }
 
 // FixedWindowPerSecond creates new rate limiter per second
-func FixedWindowPerSecond(rate int) RateLimiter {
+func FixedWindowPerSecond(rate int) *RateLimiter {
 	return FixedWindow(rate, time.Second)
 }
 
 // FixedWindowPerMinute creates new rate limiter per minute
-func FixedWindowPerMinute(rate int) RateLimiter {
+func FixedWindowPerMinute(rate int) *RateLimiter {
 	return FixedWindow(rate, time.Minute)
 }
 
 // FixedWindowPerHour creates new rate limiter per hour
-func FixedWindowPerHour(rate int) RateLimiter {
+func FixedWindowPerHour(rate int) *RateLimiter {
 	return FixedWindow(rate, time.Hour)
 }
 

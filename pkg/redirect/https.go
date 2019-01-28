@@ -5,8 +5,8 @@ import (
 )
 
 // HTTPS creates new https redirector
-func HTTPS() HTTPSRedirector {
-	return HTTPSRedirector{
+func HTTPS() *HTTPSRedirector {
+	return &HTTPSRedirector{
 		StatusCode: http.StatusMovedPermanently,
 	}
 }
