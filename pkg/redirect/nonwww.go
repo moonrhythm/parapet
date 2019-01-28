@@ -7,9 +7,7 @@ import (
 
 // NonWWW creates new non www redirector
 func NonWWW() *NonWWWRedirector {
-	return &NonWWWRedirector{
-		StatusCode: http.StatusMovedPermanently,
-	}
+	return new(NonWWWRedirector)
 }
 
 // NonWWWRedirector redirects to non-www
@@ -19,7 +17,7 @@ type NonWWWRedirector struct {
 
 // ServeHandler implements middleware interface
 func (m NonWWWRedirector) ServeHandler(h http.Handler) http.Handler {
-	if m.StatusCode == 0 {
+	if m.StatusCode <= 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}
 

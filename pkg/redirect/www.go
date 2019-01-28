@@ -7,9 +7,7 @@ import (
 
 // WWW creates new www redirector
 func WWW() *WWWRedirector {
-	return &WWWRedirector{
-		StatusCode: http.StatusMovedPermanently,
-	}
+	return new(WWWRedirector)
 }
 
 // WWWRedirector redirects to www
@@ -19,7 +17,7 @@ type WWWRedirector struct {
 
 // ServeHandler implements middleware interface
 func (m WWWRedirector) ServeHandler(h http.Handler) http.Handler {
-	if m.StatusCode == 0 {
+	if m.StatusCode <= 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}
 
