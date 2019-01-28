@@ -15,8 +15,8 @@ import (
 )
 
 // New creates new gcs backend
-func New(client *storage.Client, bucket string, basePath string) GCS {
-	return GCS{
+func New(client *storage.Client, bucket string, basePath string) *GCS {
+	return &GCS{
 		Client:   client,
 		Bucket:   bucket,
 		BasePath: basePath,
@@ -38,7 +38,7 @@ func (m GCS) ServeHandler(h http.Handler) http.Handler {
 		m.Fallback = http.NotFoundHandler()
 	}
 
-	// short-circit no bucket
+	// short-circuit no bucket
 	if m.Bucket == "" {
 		return m.Fallback
 	}

@@ -15,16 +15,17 @@ type RequestID struct {
 	TrustProxy bool
 
 	// Header is the http header key
-	Header     string
+	Header string
 }
 
 // New creates default req id middleware
-func New() RequestID {
-	return RequestID{
+func New() *RequestID {
+	return &RequestID{
 		TrustProxy: true,
 	}
 }
 
+// DefaultHeader is the default request, response header
 const DefaultHeader = "X-Request-Id"
 
 // ServeHandler implements middleware interface

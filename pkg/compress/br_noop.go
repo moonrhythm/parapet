@@ -10,8 +10,7 @@ func Br() *Noop {
 }
 
 // Noop middleware
-type Noop struct {
-}
+type Noop struct{}
 
 // ServeHandler implements middleware interface
 func (m *Noop) ServeHandler(h http.Handler) http.Handler {

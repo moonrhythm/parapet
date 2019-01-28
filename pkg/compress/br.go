@@ -9,8 +9,8 @@ import (
 )
 
 // Br creates new brotli compress middleware
-func Br() Compress {
-	return Compress{
+func Br() *Compress {
+	return &Compress{
 		New: func() Compressor {
 			return &brWriter{quality: 4}
 		},

@@ -7,8 +7,8 @@ import (
 )
 
 // Preload creates new PreloadPusher
-func Preload() PreloadPusher {
-	return PreloadPusher{}
+func Preload() *PreloadPusher {
+	return new(PreloadPusher)
 }
 
 // PreloadPusher pushes preload link

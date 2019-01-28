@@ -7,8 +7,8 @@ import (
 )
 
 // Exact creates new exact matcher
-func Exact(pattern string) ExactMatcher {
-	return ExactMatcher{Pattern: pattern}
+func Exact(pattern string) *ExactMatcher {
+	return &ExactMatcher{Pattern: pattern}
 }
 
 // ExactMatcher matches exact location

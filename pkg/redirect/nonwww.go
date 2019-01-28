@@ -6,8 +6,8 @@ import (
 )
 
 // NonWWW creates new non www redirector
-func NonWWW() NonWWWRedirector {
-	return NonWWWRedirector{
+func NonWWW() *NonWWWRedirector {
+	return &NonWWWRedirector{
 		StatusCode: http.StatusMovedPermanently,
 	}
 }

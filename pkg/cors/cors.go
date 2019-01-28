@@ -8,8 +8,8 @@ import (
 )
 
 // New creates new default cors middleware for public api
-func New() CORS {
-	return CORS{
+func New() *CORS {
+	return &CORS{
 		AllowAllOrigins: true,
 		AllowMethods:    []string{"GET", "POST", "PUT", "PATCH", "DELETE"},
 		AllowHeaders:    []string{"Authorization", "Content-Type"},

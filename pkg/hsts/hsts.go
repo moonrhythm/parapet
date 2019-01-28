@@ -14,8 +14,8 @@ type HSTS struct {
 }
 
 // Default returns default hsts
-func Default() HSTS {
-	return HSTS{
+func Default() *HSTS {
+	return &HSTS{
 		MaxAge:            31536000 * time.Second,
 		IncludeSubDomains: false,
 		Preload:           false,
@@ -23,8 +23,8 @@ func Default() HSTS {
 }
 
 // Preload returns hsts preload
-func Preload() HSTS {
-	return HSTS{
+func Preload() *HSTS {
+	return &HSTS{
 		MaxAge:            63072000 * time.Second,
 		IncludeSubDomains: true,
 		Preload:           true,

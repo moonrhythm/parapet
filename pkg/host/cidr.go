@@ -8,8 +8,8 @@ import (
 )
 
 // NewCIDR creates new CIDR host matcher
-func NewCIDR(pattern ...string) CIDR {
-	return CIDR{Patterns: pattern}
+func NewCIDR(pattern ...string) *CIDR {
+	return &CIDR{Patterns: pattern}
 }
 
 // CIDR matches http host with CIDR

@@ -12,8 +12,8 @@ type FileServer struct {
 }
 
 // New creates new file server
-func New(root string) FileServer {
-	return FileServer{Root: root}
+func New(root string) *FileServer {
+	return &FileServer{Root: root}
 }
 
 // ServeHandler implements middleware interface
