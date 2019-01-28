@@ -4,45 +4,29 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/moonrhythm/parapet"
+	"github.com/moonrhythm/parapet/pkg/block"
 )
 
-// New creates new host middleware
-func New(host ...string) *Host {
-	return &Host{Hosts: host}
-}
-
-// Host middleware
-type Host struct {
-	Hosts []string
-	ms    parapet.Middlewares
-}
-
-// Use uses middleware
-func (host *Host) Use(m parapet.Middleware) {
-	host.ms.Use(m)
-}
-
-// ServeHandler implements middleware interface
-func (host Host) ServeHandler(h http.Handler) http.Handler {
-	next := host.ms.ServeHandler(http.NotFoundHandler())
-
+// New creates new host block
+func New(host ...string) *block.Block {
 	// build host map
 	hostMap := make(map[string]bool)
-	for _, x := range host.Hosts {
+	for _, x := range host {
 		hostMap[x] = true
 	}
 
-	// catch-all
-	if len(host.Hosts) == 0 || hostMap["*"] {
-		return next
+	if len(host) == 0 {
+		return block.New(func(_ *http.Request) bool { return false })
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if hostMap["*"] {
+		return block.New(nil)
+	}
+
+	return block.New(func(r *http.Request) bool {
 		// exact match
 		if hostMap[r.Host] {
-			next.ServeHTTP(w, r)
-			return
+			return true
 		}
 
 		// wildcard subdomains
@@ -54,12 +38,11 @@ func (host Host) ServeHandler(h http.Handler) http.Handler {
 			}
 
 			if hostMap["*"+host[i:]] {
-				next.ServeHTTP(w, r)
-				return
+				return true
 			}
 			host = host[i+1:]
 		}
 
-		h.ServeHTTP(w, r)
+		return false
 	})
 }

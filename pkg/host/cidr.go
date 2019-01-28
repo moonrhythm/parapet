@@ -4,59 +4,38 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/moonrhythm/parapet"
+	"github.com/moonrhythm/parapet/pkg/block"
 )
 
-// NewCIDR creates new CIDR host matcher
-func NewCIDR(pattern ...string) *CIDR {
-	return &CIDR{Patterns: pattern}
-}
-
-// CIDR matches http host with CIDR
-type CIDR struct {
-	Patterns []string
-	ms       parapet.Middlewares
-}
-
-// Use uses middleware
-func (host *CIDR) Use(m parapet.Middleware) {
-	host.ms.Use(m)
-}
-
-// ServeHandler implements middleware interface
-func (host CIDR) ServeHandler(h http.Handler) http.Handler {
-	next := host.ms.ServeHandler(http.NotFoundHandler())
-
+// NewCIDR creates new CIDR host matcher block
+func NewCIDR(pattern ...string) *block.Block {
 	var nets []*net.IPNet
-
-	for _, p := range host.Patterns {
+	for _, p := range pattern {
 		_, n, _ := net.ParseCIDR(p)
 		if n != nil {
 			nets = append(nets, n)
 		}
 	}
 	if len(nets) == 0 {
-		return h
+		return block.New(func(_ *http.Request) bool { return false })
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return block.New(func(r *http.Request) bool {
 		requestHost, _, _ := net.SplitHostPort(r.Host)
 		if requestHost == "" {
 			requestHost = r.Host
 		}
 		ip := net.ParseIP(requestHost)
 		if ip == nil {
-			h.ServeHTTP(w, r)
-			return
+			return false
 		}
 
 		for _, n := range nets {
-			if !n.Contains(ip) {
-				h.ServeHTTP(w, r)
-				return
+			if n.Contains(ip) {
+				return true
 			}
 		}
 
-		next.ServeHTTP(w, r)
+		return false
 	})
 }

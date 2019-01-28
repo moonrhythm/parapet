@@ -20,7 +20,7 @@ func TestHost(t *testing.T) {
 		Host    string
 		Matched bool
 	}{
-		{"Empty", nil, "localhost", true},
+		{"Empty should not matched", nil, "localhost", false},
 		{"Wildcard", []string{"*"}, "localhost", true},
 		{"Exact", []string{"moonrhythm.io"}, "moonrhythm.io", true},
 		{"2rd Exact", []string{"google.com", "moonrhythm.io"}, "moonrhythm.io", true},
