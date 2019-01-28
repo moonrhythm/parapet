@@ -41,6 +41,8 @@ func TestRequestBufferer(t *testing.T) {
 			}
 			p, _ := ioutil.ReadAll(r.Body)
 			assert.Equal(t, []byte("test"), p)
+			assert.EqualValues(t, 4, r.ContentLength)
+			assert.Len(t, p, 4)
 		})).ServeHTTP(w, r)
 	})
 
@@ -69,6 +71,8 @@ func TestRequestBufferer(t *testing.T) {
 			}
 			p, _ := ioutil.ReadAll(r.Body)
 			assert.Equal(t, []byte("test"), p)
+			assert.EqualValues(t, 4, r.ContentLength)
+			assert.Len(t, p, 4)
 		})).ServeHTTP(w, r)
 	})
 
