@@ -32,11 +32,13 @@ func (m Healthz) ServeHandler(h http.Handler) http.Handler {
 			}
 		})
 
-		p := atomic.LoadInt32(&shutdown)
-		if p > 0 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			w.Write([]byte("Service Unavailable"))
-			return
+		if r.URL.Query().Get("ready") != "" {
+			p := atomic.LoadInt32(&shutdown)
+			if p > 0 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				w.Write([]byte("Service Unavailable"))
+				return
+			}
 		}
 
 		w.WriteHeader(http.StatusOK)

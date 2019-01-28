@@ -24,14 +24,29 @@ func TestHealthz(t *testing.T) {
 	go s.ListenAndServe()
 	time.Sleep(50 * time.Millisecond)
 
+	// liveness
 	resp, err := http.Get("http://127.0.0.1:10100")
+	if assert.NoError(t, err) {
+		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
+	}
+
+	// readiness
+	resp, err = http.Get("http://127.0.0.1:10100?ready=1")
 	if assert.NoError(t, err) {
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 	}
 
 	go s.Shutdown()
 	time.Sleep(20 * time.Millisecond)
+
+	// liveness while shutdown
 	resp, err = http.Get("http://127.0.0.1:10100")
+	if assert.NoError(t, err) {
+		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
+	}
+
+	// readiness while shutdown
+	resp, err = http.Get("http://127.0.0.1:10100?ready=1")
 	if assert.NoError(t, err) {
 		assert.EqualValues(t, http.StatusServiceUnavailable, resp.StatusCode)
 	}
