@@ -3,15 +3,17 @@ package location
 import (
 	"net/http"
 	"strings"
+
+	"github.com/moonrhythm/parapet/pkg/block"
 )
 
-// Prefix creates new prefix matcher
-func Prefix(pattern string) *Matcher {
+// Prefix creates new prefix location matcher block
+func Prefix(pattern string) *block.Block {
 	if pattern == "" {
-		return New(nil)
+		return block.New(nil)
 	}
 
-	return New(func(r *http.Request) bool {
+	return block.New(func(r *http.Request) bool {
 		return strings.HasPrefix(r.URL.Path, pattern)
 	})
 }

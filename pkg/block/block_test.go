@@ -1,4 +1,4 @@
-package location_test
+package block_test
 
 import (
 	"net/http"
@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/moonrhythm/parapet"
-	. "github.com/moonrhythm/parapet/pkg/location"
+	. "github.com/moonrhythm/parapet/pkg/block"
 )
 
-func TestMatcher(t *testing.T) {
+func TestBlock(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Match", func(t *testing.T) {

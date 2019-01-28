@@ -3,17 +3,19 @@ package location
 import (
 	"net/http"
 	"regexp"
+
+	"github.com/moonrhythm/parapet/pkg/block"
 )
 
-// RegExp creates new RegExp matcher
-func RegExp(pattern string) *Matcher {
+// RegExp creates new RegExp location matcher block
+func RegExp(pattern string) *block.Block {
 	if pattern == "" {
-		return New(nil)
+		return block.New(nil)
 	}
 
 	re := regexp.MustCompile(pattern)
 
-	return New(func(r *http.Request) bool {
+	return block.New(func(r *http.Request) bool {
 		return re.MatchString(r.URL.Path)
 	})
 }
