@@ -2,34 +2,34 @@ package upstream
 
 import (
 	"context"
+	"github.com/moonrhythm/parapet/pkg/logger"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
-	"time"
-
-	"github.com/moonrhythm/parapet/pkg/logger"
 )
+
+// Transporter interface
+type Transporter interface {
+	http.RoundTripper
+
+	Scheme() string
+}
 
 // Upstream middleware
 type Upstream struct {
-	Target                string
-	Host                  string // override host
-	DialTimeout           time.Duration
-	TCPKeepAlive          time.Duration
-	DisableKeepAlives     bool
-	MaxIdleConns          int
-	IdleConnTimeout       time.Duration
-	ResponseHeaderTimeout time.Duration
-	VerifyCA              bool
-	ErrorLog              *log.Logger
+	Target    string
+	Host      string // override host
+	Transport Transporter
+	ErrorLog  *log.Logger
 }
 
 // New creates new upstream with default config
-func New(target string) *Upstream {
+func New(target string, transport Transporter) *Upstream {
 	return &Upstream{
-		Target: target,
+		Target:    target,
+		Transport: transport,
 	}
 }
 
@@ -53,7 +53,7 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 
-			switch target.Scheme {
+			switch m.Transport.Scheme() {
 			case "unix":
 				req.URL.Host = "/" + target.Host + "/" + target.Path
 			default:
@@ -75,7 +75,7 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			}
 		},
 		BufferPool: bytesPool,
-		Transport:  m.transport(target.Scheme),
+		Transport:  m.Transport,
 		ErrorLog:   m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if err == context.Canceled {
@@ -84,6 +84,7 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			}
 
 			m.logf("upstream: %v", err)
+			// TODO: retry ?
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
 	}
