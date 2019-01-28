@@ -20,7 +20,7 @@ type Redirector struct {
 
 // ServeHandler implements middleware interface
 func (m Redirector) ServeHandler(h http.Handler) http.Handler {
-	if m.StatusCode == 0 {
+	if m.StatusCode <= 0 {
 		m.StatusCode = http.StatusMovedPermanently
 	}
 
