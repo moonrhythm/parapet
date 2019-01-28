@@ -13,6 +13,7 @@ func New() *Server {
 	return &Server{
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
+		WaitBeforeShutdown: 10 * time.Second,
 		TrustProxy:         true,
 		ReusePort:          true,
 		TrackConnState:     true,
@@ -29,6 +30,7 @@ func NewFrontend() *Server {
 		IdleTimeout:        75 * time.Second,
 		TCPKeepAlivePeriod: 60 * time.Second,
 		GraceTimeout:       30 * time.Second,
+		WaitBeforeShutdown: 10 * time.Second,
 		ReusePort:          true,
 		TrackConnState:     true,
 		Handler:            http.NotFoundHandler(),
@@ -43,6 +45,7 @@ func NewBackend() *Server {
 	return &Server{
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
+		WaitBeforeShutdown: 10 * time.Second,
 		TrustProxy:         true,
 		H2C:                true,
 		ReusePort:          true,

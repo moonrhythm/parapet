@@ -24,6 +24,7 @@ type Server struct {
 	once       sync.Once
 	trackState sync.Once
 	ms         Middlewares
+	onShutdown []func()
 
 	Addr               string
 	Handler            http.Handler
@@ -33,12 +34,18 @@ type Server struct {
 	IdleTimeout        time.Duration
 	TCPKeepAlivePeriod time.Duration
 	GraceTimeout       time.Duration
+	WaitBeforeShutdown time.Duration
 	ErrorLog           *log.Logger
 	TrackConnState     bool
 	TrustProxy         bool
 	H2C                bool
 	ReusePort          bool
 }
+
+type serverContextKey struct{}
+
+// ServerContextKey is the context key that store *parapet.Server
+var ServerContextKey = serverContextKey{}
 
 // Use uses middleware
 func (s *Server) Use(m Middleware) {
@@ -129,6 +136,12 @@ func (s *Server) configHandler() {
 		} else {
 			h = untrustProxy{}.ServeHandler(h)
 		}
+		h = func(h http.Handler) http.HandlerFunc {
+			return func(w http.ResponseWriter, r *http.Request) {
+				ctx := context.WithValue(r.Context(), ServerContextKey, s)
+				h.ServeHTTP(w, r.WithContext(ctx))
+			}
+		}(h)
 		if s.H2C {
 			h2s := &http2.Server{}
 			h = h2c.NewHandler(h, h2s)
@@ -158,12 +171,7 @@ func (s *Server) ListenAndServe() error {
 	case err := <-errChan:
 		return err
 	case <-shutdown:
-		// wait for service to deregistered
-		time.Sleep(5 * time.Second)
-
-		ctx, cancel := context.WithTimeout(context.Background(), s.GraceTimeout)
-		defer cancel()
-		return s.Shutdown(ctx)
+		return s.Shutdown()
 	}
 }
 
@@ -198,7 +206,22 @@ func (s *Server) Serve(l net.Listener) error {
 	return s.s.Serve(l)
 }
 
-// Shutdown shutdowns server
-func (s *Server) Shutdown(ctx context.Context) error {
+// Shutdown gracefully shutdowns server
+func (s *Server) Shutdown() error {
+	for _, f := range s.onShutdown {
+		go f()
+	}
+
+	// wait for service to de-registered
+	time.Sleep(s.WaitBeforeShutdown)
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.GraceTimeout)
+	defer cancel()
+
 	return s.s.Shutdown(ctx)
+}
+
+// RegisterOnShutdown calls f when server received SIGTERM
+func (s *Server) RegisterOnShutdown(f func()) {
+	s.onShutdown = append(s.onShutdown, f)
 }
