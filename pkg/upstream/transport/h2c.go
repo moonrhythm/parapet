@@ -16,7 +16,6 @@ type H2C struct {
 	h    *http.Transport
 
 	DialTimeout           time.Duration
-	Timeout               time.Duration
 	TCPKeepAlive          time.Duration
 	DisableKeepAlives     bool
 	MaxIdleConns          int
@@ -28,7 +27,7 @@ type H2C struct {
 func (t *H2C) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.TCPKeepAlive == 0 {
-			t.TCPKeepAlive = 10 * time.Minute
+			t.TCPKeepAlive = time.Minute
 		}
 		if t.MaxIdleConns == 0 {
 			t.MaxIdleConns = 100
