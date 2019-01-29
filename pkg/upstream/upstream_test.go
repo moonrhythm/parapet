@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -93,5 +94,35 @@ func TestUpstream(t *testing.T) {
 			Host: "www.google.com",
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.Equal(t, http.StatusBadGateway, w.Code)
+	})
+
+	t.Run("Retry", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+
+		cnt := 0
+		start := time.Now()
+		Upstream{
+			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				cnt++
+				return nil, fmt.Errorf("can not dial to server")
+			}),
+			Retries:       3,
+			BackoffFactor: 50 * time.Millisecond,
+		}.ServeHandler(nil).ServeHTTP(w, r)
+		assert.Equal(t, 4, cnt)
+		assert.WithinDuration(t, start.Add((50+100+200)*time.Millisecond), time.Now(), 20*time.Millisecond)
+	})
+
+	t.Run("Unavailable", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+
+		Upstream{
+			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				return nil, ErrUnavailable
+			}),
+		}.ServeHandler(nil).ServeHTTP(w, r)
+		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	})
 }

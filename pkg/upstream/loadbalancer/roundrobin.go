@@ -3,6 +3,8 @@ package loadbalancer
 import (
 	"net/http"
 	"sync/atomic"
+
+	"github.com/moonrhythm/parapet/pkg/upstream"
 )
 
 // NewRoundRobin creates new round-robin load balancer
@@ -22,7 +24,7 @@ type RoundRobin struct {
 // RoundTrip sends a request to upstream server
 func (l *RoundRobin) RoundTrip(r *http.Request) (*http.Response, error) {
 	if len(l.Targets) == 0 {
-		return badGateway{}.RoundTrip(r)
+		return nil, upstream.ErrUnavailable
 	}
 
 	i := atomic.AddUint32(&l.i, 1) - 1

@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/moonrhythm/parapet/pkg/upstream"
 	. "github.com/moonrhythm/parapet/pkg/upstream/loadbalancer"
 )
 
@@ -19,6 +20,7 @@ func TestRoundRobin(t *testing.T) {
 		resp, err := l.RoundTrip(r)
 		assert.Nil(t, resp)
 		assert.Error(t, err)
+		assert.Equal(t, upstream.ErrUnavailable, err)
 	})
 
 	t.Run("One target", func(t *testing.T) {

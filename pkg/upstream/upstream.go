@@ -2,27 +2,38 @@ package upstream
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/moonrhythm/parapet/pkg/logger"
 )
 
+// Errors
+var (
+	ErrUnavailable = errors.New("upstream: unavailable")
+)
+
 // Upstream controls request flow to upstream server via load balancer
 type Upstream struct {
-	Transport http.RoundTripper
-	ErrorLog  *log.Logger
-	Host      string // override host
-	Path      string // target prefix path
+	Transport     http.RoundTripper
+	ErrorLog      *log.Logger
+	Host          string // override host
+	Path          string // target prefix path
+	Retries       int
+	BackoffFactor time.Duration
 }
 
 // New creates new upstream
 func New(transport http.RoundTripper) *Upstream {
 	return &Upstream{
-		Transport: transport,
+		Transport:     transport,
+		Retries:       3,
+		BackoffFactor: 50 * time.Millisecond,
 	}
 }
 
@@ -44,7 +55,8 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 		panic(err)
 	}
 
-	p := &httputil.ReverseProxy{
+	var p http.Handler
+	p = &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
 			req.URL.Path = singleJoiningSlash(targetPath.Path, req.URL.Path)
 
@@ -73,9 +85,28 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 				return
 			}
 
+			ctx := r.Context()
+			retry, _ := ctx.Value(retryContextKey{}).(int)
+			if retry < m.Retries {
+				time.Sleep(m.BackoffFactor * time.Duration(1<<uint(retry)))
+				if err == context.Canceled {
+					// client canceled request
+					return
+				}
+
+				r = r.WithContext(context.WithValue(ctx, retryContextKey{}, retry+1))
+				p.ServeHTTP(w, r)
+				return
+			}
+
 			m.logf("upstream: %v", err)
-			// TODO: retry ?
-			http.Error(w, "Bad Gateway", http.StatusBadGateway)
+			switch err {
+			case ErrUnavailable:
+				http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
+			// TODO: timeout is unexposed from http (transport) package
+			default:
+				http.Error(w, "Bad Gateway", http.StatusBadGateway)
+			}
 		},
 	}
 
@@ -99,3 +130,5 @@ type roundTripperFunc func(r *http.Request) (*http.Response, error)
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
 }
+
+type retryContextKey struct{}
