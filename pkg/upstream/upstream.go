@@ -2,33 +2,26 @@ package upstream
 
 import (
 	"context"
-	"github.com/moonrhythm/parapet/pkg/logger"
 	"log"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+
+	"github.com/moonrhythm/parapet/pkg/logger"
 )
 
-// Transporter interface
-type Transporter interface {
-	http.RoundTripper
-
-	Scheme() string
-}
-
-// Upstream middleware
+// Upstream controls request flow to upstream server via load balancer
 type Upstream struct {
-	Target    string
-	Host      string // override host
-	Transport Transporter
+	Transport http.RoundTripper
 	ErrorLog  *log.Logger
+	Host      string // override host
+	Path      string // target prefix path
 }
 
-// New creates new upstream with default config
-func New(target string, transport Transporter) *Upstream {
+// New creates new upstream
+func New(transport http.RoundTripper) *Upstream {
 	return &Upstream{
-		Target:    target,
 		Transport: transport,
 	}
 }
@@ -43,28 +36,19 @@ func (m *Upstream) logf(format string, v ...interface{}) {
 
 // ServeHandler implements middleware interface
 func (m Upstream) ServeHandler(h http.Handler) http.Handler {
-	target, err := url.Parse(m.Target)
+	targetPath, err := url.ParseRequestURI(m.Path)
 	if err != nil {
 		panic(err)
 	}
 
-	targetQuery := target.RawQuery
-	p := httputil.ReverseProxy{
+	p := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
-			req.URL.Scheme = target.Scheme
+			req.URL.Path = singleJoiningSlash(targetPath.Path, req.URL.Path)
 
-			switch m.Transport.Scheme() {
-			case "unix":
-				req.URL.Host = "/" + target.Host + "/" + target.Path
-			default:
-				req.URL.Host = target.Host
-				req.URL.Path = singleJoiningSlash(target.Path, req.URL.Path)
-			}
-
-			if targetQuery == "" || req.URL.RawQuery == "" {
-				req.URL.RawQuery = targetQuery + req.URL.RawQuery
+			if targetPath.RawQuery == "" || req.URL.RawQuery == "" {
+				req.URL.RawQuery = targetPath.RawQuery + req.URL.RawQuery
 			} else {
-				req.URL.RawQuery = targetQuery + "&" + req.URL.RawQuery
+				req.URL.RawQuery = targetPath.RawQuery + "&" + req.URL.RawQuery
 			}
 			if _, ok := req.Header["User-Agent"]; !ok {
 				req.Header.Set("User-Agent", "")
@@ -75,8 +59,11 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			}
 		},
 		BufferPool: bytesPool,
-		Transport:  m.Transport,
-		ErrorLog:   m.ErrorLog,
+		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			logger.Set(r.Context(), "upstream", r.URL.Host)
+			return m.Transport.RoundTrip(r)
+		}),
+		ErrorLog: m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if err == context.Canceled {
 				// client canceled request
@@ -89,11 +76,7 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 		},
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		logger.Set(r.Context(), "upstream", m.Target)
-
-		p.ServeHTTP(w, r)
-	})
+	return p
 }
 
 func singleJoiningSlash(a, b string) string {
@@ -106,4 +89,10 @@ func singleJoiningSlash(a, b string) string {
 		return a + "/" + b
 	}
 	return a + b
+}
+
+type roundTripperFunc func(r *http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
 }

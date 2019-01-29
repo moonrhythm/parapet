@@ -23,6 +23,7 @@ type HTTPS struct {
 	VerifyCA              bool
 }
 
+// RoundTrip implement http.RoundTripper
 func (t *HTTPS) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.TCPKeepAlive == 0 {
@@ -55,9 +56,6 @@ func (t *HTTPS) RoundTrip(r *http.Request) (*http.Response, error) {
 		}
 	})
 
+	r.URL.Scheme = "https"
 	return t.h.RoundTrip(r)
-}
-
-func (t *HTTPS) Scheme() string {
-	return "https"
 }

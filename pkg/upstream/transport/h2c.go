@@ -24,6 +24,7 @@ type H2C struct {
 	ResponseHeaderTimeout time.Duration
 }
 
+// RoundTrip implement http.RoundTripper
 func (t *H2C) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.TCPKeepAlive == 0 {
@@ -59,9 +60,6 @@ func (t *H2C) RoundTrip(r *http.Request) (*http.Response, error) {
 		})
 	})
 
+	r.URL.Scheme = "http"
 	return t.h.RoundTrip(r)
-}
-
-func (t *H2C) Scheme() string {
-	return "http"
 }

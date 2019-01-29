@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// Unix transport
 type Unix struct {
 	once sync.Once
 	h    *http.Transport
@@ -22,6 +23,7 @@ type Unix struct {
 	ResponseHeaderTimeout time.Duration
 }
 
+// RoundTrip implement http.RoundTripper
 func (t *Unix) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.TCPKeepAlive == 0 {
@@ -54,9 +56,7 @@ func (t *Unix) RoundTrip(r *http.Request) (*http.Response, error) {
 		}
 	})
 
+	r.URL.Scheme = "http"
+	r.URL.Host = "/" + r.URL.Host
 	return t.h.RoundTrip(r)
-}
-
-func (t *Unix) Scheme() string {
-	return "http"
 }
