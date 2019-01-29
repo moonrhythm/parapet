@@ -65,6 +65,15 @@ func TestRoundRobin(t *testing.T) {
 		assert.False(t, tr0.called)
 		assert.True(t, tr1.called)
 		assert.Equal(t, "upstream1", tr1.host)
+
+		*tr0 = fakeTransport{}
+		*tr1 = fakeTransport{}
+		r = httptest.NewRequest("GET", "/", nil)
+		resp, err = l.RoundTrip(r)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+		assert.True(t, tr0.called)
+		assert.False(t, tr1.called)
 	})
 }
 
