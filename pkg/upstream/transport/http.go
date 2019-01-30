@@ -15,6 +15,7 @@ type HTTP struct {
 	DialTimeout           time.Duration
 	TCPKeepAlive          time.Duration
 	DisableKeepAlives     bool
+	MaxConn               int
 	MaxIdleConns          int
 	IdleConnTimeout       time.Duration
 	ResponseHeaderTimeout time.Duration
@@ -27,7 +28,7 @@ func (t *HTTP) RoundTrip(r *http.Request) (*http.Response, error) {
 			t.TCPKeepAlive = time.Minute
 		}
 		if t.MaxIdleConns == 0 {
-			t.MaxIdleConns = 100
+			t.MaxIdleConns = 32
 		}
 		if t.IdleConnTimeout == 0 {
 			t.IdleConnTimeout = 10 * time.Minute
@@ -41,6 +42,7 @@ func (t *HTTP) RoundTrip(r *http.Request) (*http.Response, error) {
 				DualStack: true,
 			}).DialContext,
 			DisableKeepAlives:     t.DisableKeepAlives,
+			MaxConnsPerHost:       t.MaxConn,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
 			ExpectContinueTimeout: 1 * time.Second,
