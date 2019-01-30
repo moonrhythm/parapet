@@ -85,18 +85,19 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 				return
 			}
 
-			ctx := r.Context()
-			retry, _ := ctx.Value(retryContextKey{}).(int)
-			if retry < m.Retries {
-				time.Sleep(m.BackoffFactor * time.Duration(1<<uint(retry)))
-				if err == context.Canceled {
-					// client canceled request
+			if canRetry(r) {
+				ctx := r.Context()
+				retry, _ := ctx.Value(retryContextKey{}).(int)
+				if retry < m.Retries {
+					select {
+					case <-ctx.Done():
+						// client canceled request
+					case <-time.After(m.BackoffFactor * time.Duration(1<<uint(retry))):
+						r = r.WithContext(context.WithValue(ctx, retryContextKey{}, retry+1))
+						p.ServeHTTP(w, r)
+					}
 					return
 				}
-
-				r = r.WithContext(context.WithValue(ctx, retryContextKey{}, retry+1))
-				p.ServeHTTP(w, r)
-				return
 			}
 
 			m.logf("upstream: %v", err)
@@ -132,3 +133,25 @@ func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 type retryContextKey struct{}
+
+func canRetry(r *http.Request) bool {
+	if !isIdempotent(r.Method) {
+		return false
+	}
+
+	return r.Body == http.NoBody || r.Body == nil
+}
+
+func isIdempotent(method string) bool {
+	switch method {
+	case
+		http.MethodGet,
+		http.MethodHead,
+		http.MethodOptions,
+		http.MethodPut,
+		http.MethodDelete:
+		return true
+	default:
+		return false
+	}
+}

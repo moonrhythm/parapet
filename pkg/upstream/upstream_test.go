@@ -1,6 +1,7 @@
 package upstream
 
 import (
+	"bytes"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -112,6 +113,38 @@ func TestUpstream(t *testing.T) {
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.Equal(t, 4, cnt)
 		assert.WithinDuration(t, start.Add((50+100+200)*time.Millisecond), time.Now(), 20*time.Millisecond)
+	})
+
+	t.Run("Should not retry non-idempotent", func(t *testing.T) {
+		r := httptest.NewRequest("POST", "/", nil)
+		w := httptest.NewRecorder()
+
+		cnt := 0
+		Upstream{
+			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				cnt++
+				return nil, fmt.Errorf("can not dial to server")
+			}),
+			Retries:       3,
+			BackoffFactor: 50 * time.Millisecond,
+		}.ServeHandler(nil).ServeHTTP(w, r)
+		assert.Equal(t, 1, cnt)
+	})
+
+	t.Run("Should not retry idempotent non-empty body", func(t *testing.T) {
+		r := httptest.NewRequest("PUT", "/", bytes.NewReader([]byte("test")))
+		w := httptest.NewRecorder()
+
+		cnt := 0
+		Upstream{
+			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+				cnt++
+				return nil, fmt.Errorf("can not dial to server")
+			}),
+			Retries:       3,
+			BackoffFactor: 50 * time.Millisecond,
+		}.ServeHandler(nil).ServeHTTP(w, r)
+		assert.Equal(t, 1, cnt)
 	})
 
 	t.Run("Unavailable", func(t *testing.T) {
