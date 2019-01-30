@@ -16,6 +16,7 @@ type HTTPS struct {
 	DialTimeout           time.Duration
 	TCPKeepAlive          time.Duration
 	DisableKeepAlives     bool
+	MaxConn               int
 	MaxIdleConns          int
 	IdleConnTimeout       time.Duration
 	ResponseHeaderTimeout time.Duration
@@ -29,7 +30,7 @@ func (t *HTTPS) RoundTrip(r *http.Request) (*http.Response, error) {
 			t.TCPKeepAlive = time.Minute
 		}
 		if t.MaxIdleConns == 0 {
-			t.MaxIdleConns = 100
+			t.MaxIdleConns = 32
 		}
 		if t.IdleConnTimeout == 0 {
 			t.IdleConnTimeout = 10 * time.Minute
@@ -46,6 +47,7 @@ func (t *HTTPS) RoundTrip(r *http.Request) (*http.Response, error) {
 				InsecureSkipVerify: !t.VerifyCA,
 			},
 			DisableKeepAlives:     t.DisableKeepAlives,
+			MaxConnsPerHost:       t.MaxConn,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
 			TLSHandshakeTimeout:   5 * time.Second,
