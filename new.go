@@ -16,7 +16,6 @@ func New() *Server {
 		WaitBeforeShutdown: 10 * time.Second,
 		TrustProxy:         true,
 		ReusePort:          true,
-		TrackConnState:     true,
 		Handler:            http.NotFoundHandler(),
 	}
 }
@@ -32,7 +31,6 @@ func NewFrontend() *Server {
 		GraceTimeout:       30 * time.Second,
 		WaitBeforeShutdown: 10 * time.Second,
 		ReusePort:          true,
-		TrackConnState:     true,
 		Handler:            http.NotFoundHandler(),
 	}
 }
