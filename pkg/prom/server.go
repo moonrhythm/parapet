@@ -12,14 +12,12 @@ import (
 
 // Connections collects connection metrics from server
 func Connections(s *parapet.Server) {
-	var (
-		connTotal  = prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_total"})
-		connActive = prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_active"})
-		connIdle   = prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_idle"})
-	)
-	reg.MustRegister(connActive, connIdle)
+	connTotal := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_total"})
+	connActive := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_active"})
+	connIdle := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_idle"})
+	reg.MustRegister(connTotal, connActive, connIdle)
 
-	storage := sync.Map{}
+	var storage sync.Map
 
 	s.ConnState = func(conn net.Conn, state http.ConnState) {
 		if state == http.StateNew {

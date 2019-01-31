@@ -3,6 +3,7 @@ package prom
 import (
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -34,4 +35,15 @@ func Handler() http.Handler {
 			DisableCompression: true,
 		}),
 	)
+}
+
+// Start starts prom server
+func Start(addr string) error {
+	return (&http.Server{
+		Addr:         addr,
+		ReadTimeout:  30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		Handler:      Handler(),
+	}).ListenAndServe()
 }
