@@ -14,8 +14,6 @@ import (
 	"github.com/kavu/go_reuseport"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
-
-	"github.com/moonrhythm/parapet/pkg/metric"
 )
 
 // Server is the parapet server
@@ -36,10 +34,10 @@ type Server struct {
 	GraceTimeout       time.Duration
 	WaitBeforeShutdown time.Duration
 	ErrorLog           *log.Logger
-	TrackConnState     bool
 	TrustProxy         bool
 	H2C                bool
 	ReusePort          bool
+	ConnState          func(conn net.Conn, state http.ConnState)
 }
 
 type serverContextKey struct{}
@@ -65,67 +63,13 @@ func (s *Server) configServer() {
 	s.configHandler()
 
 	s.s.Addr = s.Addr
+	s.s.ConnState = s.ConnState
 
 	s.s.ReadTimeout = s.ReadTimeout
 	s.s.ReadHeaderTimeout = s.ReadHeaderTimeout
 	s.s.WriteTimeout = s.WriteTimeout
 	s.s.IdleTimeout = s.IdleTimeout
 	s.s.ErrorLog = s.ErrorLog
-	s.trackConnState()
-}
-
-func (s *Server) trackConnState() {
-	if !s.TrackConnState {
-		return
-	}
-
-	s.trackState.Do(func() {
-		type stateChange struct {
-			conn  net.Conn
-			state http.ConnState
-		}
-
-		storage := make(map[net.Conn]http.ConnState)
-		chState := make(chan *stateChange, 100)
-
-		s.s.ConnState = func(conn net.Conn, state http.ConnState) {
-			if state == http.StateNew {
-				return
-			}
-
-			chState <- &stateChange{conn, state}
-		}
-
-		go func() {
-			collect := time.Tick(5 * time.Second)
-			for {
-				select {
-				case s := <-chState:
-					switch s.state {
-					case http.StateHijacked, http.StateClosed:
-						delete(storage, s.conn)
-					default:
-						storage[s.conn] = s.state
-					}
-				case <-collect:
-					var (
-						active int64
-						idle   int64
-					)
-					for _, state := range storage {
-						switch state {
-						case http.StateActive:
-							active++
-						case http.StateIdle:
-							idle++
-						}
-					}
-					metric.Set("connection:active", active)
-					metric.Set("connection:idle", idle)
-				}
-			}
-		}()
-	})
 }
 
 func (s *Server) configHandler() {
