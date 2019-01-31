@@ -75,8 +75,9 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 		},
 		BufferPool: bytesPool,
 		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			resp, err := m.Transport.RoundTrip(r)
 			logger.Set(r.Context(), "upstream", r.URL.Host)
-			return m.Transport.RoundTrip(r)
+			return resp, err
 		}),
 		ErrorLog: m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {

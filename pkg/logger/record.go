@@ -20,6 +20,10 @@ func (r *record) Set(name string, value interface{}) {
 	r.data[name] = value
 }
 
+func (r *record) Get(name string) interface{} {
+	return r.data[name]
+}
+
 func (r *record) omitEmpty() {
 	for k, v := range r.data {
 		if isEmpty(v) {
@@ -63,4 +67,13 @@ func Set(ctx context.Context, name string, value interface{}) {
 		return
 	}
 	r.Set(name, value)
+}
+
+// Get gets log record field
+func Get(ctx context.Context, name string) interface{} {
+	r := getRecord(ctx)
+	if r == nil {
+		return nil
+	}
+	return r.Get(name)
 }

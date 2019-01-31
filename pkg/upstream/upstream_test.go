@@ -9,6 +9,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+
+	"github.com/moonrhythm/parapet"
+	"github.com/moonrhythm/parapet/pkg/logger"
 )
 
 func TestUpstream(t *testing.T) {
@@ -157,5 +160,28 @@ func TestUpstream(t *testing.T) {
 			}),
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
+	})
+
+	t.Run("Log Upstream", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/path", nil)
+		w := httptest.NewRecorder()
+
+		var upstreamServer string
+
+		ms := parapet.Middlewares{}
+		ms.Use(logger.Stdout())
+		ms.Use(parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				h.ServeHTTP(w, r)
+				upstreamServer, _ = logger.Get(r.Context(), "upstream").(string)
+			})
+		}))
+		ms.Use(New(roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			r.URL.Host = "server1"
+			return httptest.NewRecorder().Result(), nil
+		})))
+		ms.ServeHandler(nil).ServeHTTP(w, r)
+
+		assert.Equal(t, "server1", upstreamServer)
 	})
 }
