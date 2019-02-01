@@ -12,54 +12,72 @@ const (
 	headerXRealIP         = "X-Real-Ip"
 )
 
-type trustProxy struct {
+type proxy struct {
+	Trust                   []*net.IPNet
 	ComputeFullForwardedFor bool
+	Handler                 http.Handler
 }
 
-func (m trustProxy) ServeHandler(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: handle compute full forwarded for from server
-		if m.ComputeFullForwardedFor {
-			remoteIP := parseHost(r.RemoteAddr)
-			if p := r.Header.Get(headerXForwardedFor); p == "" {
-				r.Header.Set(headerXForwardedFor, remoteIP)
-			} else {
-				r.Header.Set(headerXForwardedFor, p+", "+remoteIP)
-			}
-		}
+func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if len(m.Trust) == 0 {
+		m.distrust(w, r)
+		return
+	}
 
-		if r.Header.Get(headerXRealIP) == "" {
-			r.Header.Set(headerXRealIP, firstHost(r.Header.Get(headerXForwardedFor)))
-		}
+	remoteIP := net.ParseIP(parseHost(r.RemoteAddr))
+	if remoteIP == nil {
+		m.distrust(w, r)
+		return
+	}
 
-		if r.Header.Get(headerXForwardedProto) == "" {
-			if r.TLS == nil {
-				r.Header.Set(headerXForwardedProto, "http")
-			} else {
-				r.Header.Set(headerXForwardedProto, "https")
-			}
+	for _, p := range m.Trust {
+		if p.Contains(remoteIP) {
+			m.trust(w, r)
+			return
 		}
+	}
 
-		h.ServeHTTP(w, r)
-	})
+	m.distrust(w, r)
 }
 
-type untrustProxy struct{}
-
-func (m untrustProxy) ServeHandler(h http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
+	// TODO: handle compute full forwarded for from server
+	if m.ComputeFullForwardedFor {
 		remoteIP := parseHost(r.RemoteAddr)
-		r.Header.Set(headerXForwardedFor, remoteIP)
-		r.Header.Set(headerXRealIP, remoteIP)
+		if p := r.Header.Get(headerXForwardedFor); p == "" {
+			r.Header.Set(headerXForwardedFor, remoteIP)
+		} else {
+			r.Header.Set(headerXForwardedFor, p+", "+remoteIP)
+		}
+	}
 
+	if r.Header.Get(headerXRealIP) == "" {
+		r.Header.Set(headerXRealIP, firstHost(r.Header.Get(headerXForwardedFor)))
+	}
+
+	if r.Header.Get(headerXForwardedProto) == "" {
 		if r.TLS == nil {
 			r.Header.Set(headerXForwardedProto, "http")
 		} else {
 			r.Header.Set(headerXForwardedProto, "https")
 		}
+	}
 
-		h.ServeHTTP(w, r)
-	})
+	m.Handler.ServeHTTP(w, r)
+}
+
+func (m *proxy) distrust(w http.ResponseWriter, r *http.Request) {
+	remoteIP := parseHost(r.RemoteAddr)
+	r.Header.Set(headerXForwardedFor, remoteIP)
+	r.Header.Set(headerXRealIP, remoteIP)
+
+	if r.TLS == nil {
+		r.Header.Set(headerXForwardedProto, "http")
+	} else {
+		r.Header.Set(headerXForwardedProto, "https")
+	}
+
+	m.Handler.ServeHTTP(w, r)
 }
 
 func parseHost(s string) string {
@@ -73,4 +91,15 @@ func firstHost(s string) string {
 		return s
 	}
 	return s[:i]
+}
+
+func parseCIDRs(xs []string) []*net.IPNet {
+	var rs []*net.IPNet
+	for _, x := range xs {
+		_, n, err := net.ParseCIDR(x)
+		if err != nil {
+			rs = append(rs, n)
+		}
+	}
+	return rs
 }

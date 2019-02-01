@@ -34,7 +34,7 @@ type Server struct {
 	GraceTimeout       time.Duration
 	WaitBeforeShutdown time.Duration
 	ErrorLog           *log.Logger
-	TrustProxy         bool
+	TrustProxy         []string
 	H2C                bool
 	ReusePort          bool
 	ConnState          func(conn net.Conn, state http.ConnState)
@@ -75,10 +75,9 @@ func (s *Server) configServer() {
 func (s *Server) configHandler() {
 	s.once.Do(func() {
 		h := s.ms.ServeHandler(s.Handler)
-		if s.TrustProxy {
-			h = trustProxy{}.ServeHandler(h)
-		} else {
-			h = untrustProxy{}.ServeHandler(h)
+		h = &proxy{
+			Trust:   parseCIDRs(s.TrustProxy),
+			Handler: h,
 		}
 		h = func(h http.Handler) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
@@ -87,8 +86,7 @@ func (s *Server) configHandler() {
 			}
 		}(h)
 		if s.H2C {
-			h2s := &http2.Server{}
-			h = h2c.NewHandler(h, h2s)
+			h = h2c.NewHandler(h, &http2.Server{})
 		}
 		s.s.Handler = h
 	})
