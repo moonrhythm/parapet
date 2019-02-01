@@ -20,13 +20,13 @@ type proxy struct {
 
 func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if len(m.Trust) == 0 {
-		m.untrust(w, r)
+		m.distrust(w, r)
 		return
 	}
 
 	remoteIP := net.ParseIP(parseHost(r.RemoteAddr))
 	if remoteIP == nil {
-		m.untrust(w, r)
+		m.distrust(w, r)
 		return
 	}
 
@@ -37,7 +37,7 @@ func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	m.untrust(w, r)
+	m.distrust(w, r)
 }
 
 func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +66,7 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 	m.Handler.ServeHTTP(w, r)
 }
 
-func (m *proxy) untrust(w http.ResponseWriter, r *http.Request) {
+func (m *proxy) distrust(w http.ResponseWriter, r *http.Request) {
 	remoteIP := parseHost(r.RemoteAddr)
 	r.Header.Set(headerXForwardedFor, remoteIP)
 	r.Header.Set(headerXRealIP, remoteIP)
