@@ -8,13 +8,13 @@ import (
 // New creates new middleware server default config
 //
 // This server should not expose to the internet
-// but run behide reverse proxy
+// but run behind reverse proxy
 func New() *Server {
 	return &Server{
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		WaitBeforeShutdown: 10 * time.Second,
-		TrustProxy:         true,
+		TrustProxy:         []string{"0.0.0.0/0"},
 		ReusePort:          true,
 		Handler:            http.NotFoundHandler(),
 	}
@@ -37,14 +37,14 @@ func NewFrontend() *Server {
 
 // NewBackend creates new backend server default config
 //
-// This server use to run behide parapet server
-// or run behide other reverse proxy
+// This server use to run behind parapet server
+// or run behind other reverse proxy
 func NewBackend() *Server {
 	return &Server{
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		WaitBeforeShutdown: 10 * time.Second,
-		TrustProxy:         true,
+		TrustProxy:         []string{"0.0.0.0/0"},
 		H2C:                true,
 		ReusePort:          true,
 		Handler:            http.NotFoundHandler(),
