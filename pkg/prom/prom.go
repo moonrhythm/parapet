@@ -17,8 +17,7 @@ var Namespace = "parapet"
 func init() {
 	reg.MustRegister(prometheus.NewGoCollector())
 	reg.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{
-		PidFn:     func() (int, error) { return os.Getpid(), nil },
-		Namespace: Namespace,
+		PidFn: func() (int, error) { return os.Getpid(), nil },
 	}))
 }
 
