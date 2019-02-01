@@ -2,6 +2,7 @@ package prom
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -10,16 +11,53 @@ import (
 
 // Requests collects request count
 func Requests() parapet.Middleware {
-	counter := prometheus.NewCounter(prometheus.CounterOpts{
+	requests := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Namespace: Namespace,
-		Name:      "request_total",
-	})
-	reg.MustRegister(counter)
+		Name:      "requests",
+	}, []string{"host", "status", "method"})
+	reg.MustRegister(requests)
 
 	return parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			counter.Inc()
-			h.ServeHTTP(w, r)
+			l := prometheus.Labels{
+				"method": r.Method,
+				"host":   r.Host,
+			}
+			nw := requestTrackRW{
+				ResponseWriter: w,
+			}
+			defer func() {
+				l["status"] = strconv.Itoa(nw.status)
+				counter, err := requests.GetMetricWith(l)
+				if err != nil {
+					counter.Inc()
+				}
+			}()
+
+			h.ServeHTTP(&nw, r)
 		})
 	})
+}
+
+type requestTrackRW struct {
+	http.ResponseWriter
+
+	wroteHeader bool
+	status      int
+}
+
+func (w *requestTrackRW) WriteHeader(code int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.status = code
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *requestTrackRW) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
 }
