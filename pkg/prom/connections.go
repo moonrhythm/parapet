@@ -12,36 +12,48 @@ import (
 
 // Connections collects connection metrics from server
 func Connections(s *parapet.Server) {
-	connTotal := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_total"})
-	connActive := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_active"})
-	connIdle := prometheus.NewGauge(prometheus.GaugeOpts{Namespace: Namespace, Name: "connection_idle"})
-	reg.MustRegister(connTotal, connActive, connIdle)
+	connections := prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: Namespace,
+		Name:      "connections",
+	}, []string{"state"})
+	reg.MustRegister(connections)
 
-	var storage sync.Map
-
-	s.ConnState = func(conn net.Conn, state http.ConnState) {
-		if state == http.StateNew {
-			connTotal.Inc()
+	inc := func(state http.ConnState) {
+		c, err := connections.GetMetricWith(prometheus.Labels{"state": state.String()})
+		if err != nil {
 			return
 		}
+		c.Inc()
+	}
 
-		if prev, ok := storage.Load(conn); ok {
-			switch prev.(http.ConnState) {
-			case http.StateActive:
-				connActive.Dec()
-			case http.StateIdle:
-				connIdle.Dec()
-			}
+	dec := func(state http.ConnState) {
+		c, err := connections.GetMetricWith(prometheus.Labels{"state": state.String()})
+		if err != nil {
+			return
+		}
+		c.Dec()
+	}
+
+	var storage sync.Map
+	s.ConnState = func(conn net.Conn, state http.ConnState) {
+		// increase current state
+		if state == http.StateNew {
+			inc(state)
+			// state new doesn't have prev state
+			return
+		}
+		if state == http.StateActive || state == http.StateIdle {
+			inc(state)
 		}
 
-		switch state {
-		case http.StateActive:
-			connActive.Inc()
-		case http.StateIdle:
-			connIdle.Inc()
-		case http.StateHijacked, http.StateClosed:
+		// decrease prev state
+		if prev, ok := storage.Load(conn); ok {
+			dec(prev.(http.ConnState))
+		}
+
+		// terminate state
+		if state == http.StateHijacked || state == http.StateClosed {
 			storage.Delete(conn)
-			connTotal.Dec()
 			return
 		}
 
