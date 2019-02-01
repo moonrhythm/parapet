@@ -37,12 +37,7 @@ func Connections(s *parapet.Server) {
 	var storage sync.Map
 	s.ConnState = func(conn net.Conn, state http.ConnState) {
 		// increase current state
-		if state == http.StateNew {
-			inc(state)
-			// state new doesn't have prev state
-			return
-		}
-		if state == http.StateActive || state == http.StateIdle {
+		if state == http.StateNew || state == http.StateActive || state == http.StateIdle {
 			inc(state)
 		}
 
