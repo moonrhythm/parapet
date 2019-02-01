@@ -30,8 +30,9 @@ func Requests() parapet.Middleware {
 				l["status"] = strconv.Itoa(nw.status)
 				counter, err := requests.GetMetricWith(l)
 				if err != nil {
-					counter.Inc()
+					return
 				}
+				counter.Inc()
 			}()
 
 			h.ServeHTTP(&nw, r)
