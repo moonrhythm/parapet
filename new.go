@@ -14,7 +14,7 @@ func New() *Server {
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		WaitBeforeShutdown: 10 * time.Second,
-		TrustProxy:         []string{"0.0.0.0/0"},
+		TrustProxy:         Trusted(),
 		ReusePort:          true,
 		Handler:            http.NotFoundHandler(),
 	}
@@ -44,7 +44,7 @@ func NewBackend() *Server {
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		WaitBeforeShutdown: 10 * time.Second,
-		TrustProxy:         []string{"0.0.0.0/0"},
+		TrustProxy:         Trusted(),
 		H2C:                true,
 		ReusePort:          true,
 		Handler:            http.NotFoundHandler(),

@@ -6,6 +6,37 @@ import (
 	"strings"
 )
 
+// TrustCIDRs trusts given CIDR list
+func TrustCIDRs(s []string) Conditional {
+	trust := parseCIDRs(s)
+	if len(trust) == 0 {
+		return func(r *http.Request) bool {
+			return false
+		}
+	}
+
+	return func(r *http.Request) bool {
+		remoteIP := net.ParseIP(parseHost(r.RemoteAddr))
+		if remoteIP == nil {
+			return false
+		}
+
+		for _, p := range trust {
+			if p.Contains(remoteIP) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// Trusted trusts all remotes
+func Trusted() Conditional {
+	return func(r *http.Request) bool {
+		return true
+	}
+}
+
 const (
 	headerXForwardedFor   = "X-Forwarded-For"
 	headerXForwardedProto = "X-Forwarded-Proto"
@@ -13,28 +44,20 @@ const (
 )
 
 type proxy struct {
-	Trust                   []*net.IPNet
+	Trust                   func(r *http.Request) bool
 	ComputeFullForwardedFor bool
 	Handler                 http.Handler
 }
 
 func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if len(m.Trust) == 0 {
+	if m.Trust == nil {
 		m.distrust(w, r)
 		return
 	}
 
-	remoteIP := net.ParseIP(parseHost(r.RemoteAddr))
-	if remoteIP == nil {
-		m.distrust(w, r)
+	if m.Trust(r) {
+		m.trust(w, r)
 		return
-	}
-
-	for _, p := range m.Trust {
-		if p.Contains(remoteIP) {
-			m.trust(w, r)
-			return
-		}
 	}
 
 	m.distrust(w, r)

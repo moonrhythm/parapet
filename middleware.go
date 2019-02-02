@@ -39,3 +39,6 @@ func (ms Middlewares) ServeHandler(h http.Handler) http.Handler {
 	}
 	return h
 }
+
+// Conditional returns condition for given request
+type Conditional func(r *http.Request) bool

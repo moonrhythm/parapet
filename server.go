@@ -34,7 +34,7 @@ type Server struct {
 	GraceTimeout       time.Duration
 	WaitBeforeShutdown time.Duration
 	ErrorLog           *log.Logger
-	TrustProxy         []string
+	TrustProxy         Conditional
 	H2C                bool
 	ReusePort          bool
 	ConnState          func(conn net.Conn, state http.ConnState)
@@ -76,7 +76,7 @@ func (s *Server) configHandler() {
 	s.once.Do(func() {
 		h := s.ms.ServeHandler(s.Handler)
 		h = &proxy{
-			Trust:   parseCIDRs(s.TrustProxy),
+			Trust:   s.TrustProxy,
 			Handler: h,
 		}
 		h = func(h http.Handler) http.HandlerFunc {
