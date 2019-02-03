@@ -135,11 +135,19 @@ func (s *Server) listenAndServe() error {
 		return err
 	}
 
-	return s.Serve(&tcpListener{
+	ln = &tcpListener{
 		TCPListener:     ln.(*net.TCPListener),
 		KeepAlivePeriod: s.TCPKeepAlivePeriod,
-		ModifyConn:      s.modifyConn,
-	})
+	}
+
+	if len(s.modifyConn) > 0 {
+		ln = &modifyConnListener{
+			Listener:   ln,
+			ModifyConn: s.modifyConn,
+		}
+	}
+
+	return s.Serve(ln)
 }
 
 // Serve serves incoming connections
