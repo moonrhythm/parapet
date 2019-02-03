@@ -23,6 +23,7 @@ type Server struct {
 	trackState sync.Once
 	ms         Middlewares
 	onShutdown []func()
+	modifyConn []func(conn net.Conn) net.Conn
 
 	Addr               string
 	Handler            http.Handler
@@ -134,11 +135,11 @@ func (s *Server) listenAndServe() error {
 		return err
 	}
 
-	if s.TCPKeepAlivePeriod == 0 {
-		return s.Serve(ln)
-	}
-
-	return s.Serve(tcpListener{ln.(*net.TCPListener), s.TCPKeepAlivePeriod})
+	return s.Serve(&tcpListener{
+		TCPListener:     ln.(*net.TCPListener),
+		KeepAlivePeriod: s.TCPKeepAlivePeriod,
+		ModifyConn:      s.modifyConn,
+	})
 }
 
 // Serve serves incoming connections
@@ -166,4 +167,9 @@ func (s *Server) Shutdown() error {
 // RegisterOnShutdown calls f when server received SIGTERM
 func (s *Server) RegisterOnShutdown(f func()) {
 	s.onShutdown = append(s.onShutdown, f)
+}
+
+// ModifyConnection modifies connection before send to http
+func (s *Server) ModifyConnection(f func(conn net.Conn) net.Conn) {
+	s.modifyConn = append(s.modifyConn, f)
 }

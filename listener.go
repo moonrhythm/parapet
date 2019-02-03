@@ -9,6 +9,7 @@ type tcpListener struct {
 	*net.TCPListener
 
 	KeepAlivePeriod time.Duration
+	ModifyConn      []func(conn net.Conn) net.Conn
 }
 
 func (ln tcpListener) Accept() (net.Conn, error) {
@@ -16,7 +17,15 @@ func (ln tcpListener) Accept() (net.Conn, error) {
 	if err != nil {
 		return nil, err
 	}
-	tc.SetKeepAlive(true)
-	tc.SetKeepAlivePeriod(ln.KeepAlivePeriod)
-	return tc, nil
+	if ln.KeepAlivePeriod > 0 {
+		tc.SetKeepAlive(true)
+		tc.SetKeepAlivePeriod(ln.KeepAlivePeriod)
+	}
+
+	conn := net.Conn(tc)
+	for _, f := range ln.ModifyConn {
+		conn = f(conn)
+	}
+
+	return conn, nil
 }
