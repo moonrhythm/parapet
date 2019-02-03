@@ -45,12 +45,16 @@ type connNetTrack struct {
 
 func (c *connNetTrack) Read(b []byte) (n int, err error) {
 	n, err = c.Conn.Read(b)
-	c.onRead(n)
+	if n > 0 {
+		c.onRead(n)
+	}
 	return
 }
 
 func (c *connNetTrack) Write(b []byte) (n int, err error) {
 	n, err = c.Conn.Write(b)
-	c.onWrite(n)
+	if n > 0 {
+		c.onWrite(n)
+	}
 	return
 }
