@@ -29,6 +29,9 @@ func (t *Unix) RoundTrip(r *http.Request) (*http.Response, error) {
 		if t.IdleConnTimeout == 0 {
 			t.IdleConnTimeout = 10 * time.Minute
 		}
+		if t.ResponseHeaderTimeout == 0 {
+			t.ResponseHeaderTimeout = 60 * time.Second
+		}
 
 		d := &net.Dialer{}
 		t.h = &http.Transport{
