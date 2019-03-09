@@ -25,7 +25,14 @@ func (m RequestInterceptor) ServeHandler(h http.Handler) http.Handler {
 }
 
 // ResponseInterceptFunc is the function for response's interceptor
-type ResponseInterceptFunc func(w http.ResponseWriter, statusCode int)
+type ResponseInterceptFunc func(w ResponseHeaderWriter)
+
+// ResponseHeaderWriter type
+type ResponseHeaderWriter interface {
+	StatusCode() int
+	Header() http.Header
+	WriteHeader(statusCode int)
+}
 
 // InterceptResponse creates new response interceptor
 func InterceptResponse(f ResponseInterceptFunc) *ResponseInterceptor {
@@ -68,7 +75,7 @@ func (w *interceptRW) intercept() {
 		return
 	}
 	w.intercepted = true
-	w.f(w.ResponseWriter, w.status)
+	w.f(w)
 }
 
 func (w *interceptRW) WriteHeader(statusCode int) {
@@ -89,4 +96,9 @@ func (w *interceptRW) Write(p []byte) (int, error) {
 	}
 
 	return w.ResponseWriter.Write(p)
+}
+
+// StatusCode returns status code
+func (w *interceptRW) StatusCode() int {
+	return w.status
 }

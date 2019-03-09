@@ -59,10 +59,10 @@ func TestInterceptResponse(t *testing.T) {
 		w := httptest.NewRecorder()
 		called := false
 		intercepted := false
-		InterceptResponse(func(w http.ResponseWriter, statusCode int) {
+		InterceptResponse(func(w ResponseHeaderWriter) {
 			h := w.Header()
 			assert.True(t, called)
-			assert.Equal(t, 200, statusCode)
+			assert.Equal(t, 200, w.StatusCode())
 			intercepted = true
 			h.Set("X", "1")
 		}).ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,10 +79,10 @@ func TestInterceptResponse(t *testing.T) {
 		w := httptest.NewRecorder()
 		called := false
 		intercepted := false
-		InterceptResponse(func(w http.ResponseWriter, statusCode int) {
+		InterceptResponse(func(w ResponseHeaderWriter) {
 			h := w.Header()
 			assert.True(t, called)
-			assert.Equal(t, 400, statusCode)
+			assert.Equal(t, 400, w.StatusCode())
 			intercepted = true
 			h.Set("X", "1")
 		}).ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,5 +93,28 @@ func TestInterceptResponse(t *testing.T) {
 		assert.True(t, intercepted)
 		assert.True(t, called)
 		assert.Equal(t, "1", w.Header().Get("X"))
+	})
+
+	t.Run("Intercept WriteHeader", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		called := false
+		intercepted := false
+		InterceptResponse(func(w ResponseHeaderWriter) {
+			h := w.Header()
+			assert.True(t, called)
+			assert.Equal(t, 500, w.StatusCode())
+			intercepted = true
+			h.Set("X", "1")
+			w.WriteHeader(200)
+		}).ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Empty(t, w.Header().Get("X"))
+			called = true
+			w.WriteHeader(500)
+		})).ServeHTTP(w, r)
+		assert.True(t, intercepted)
+		assert.True(t, called)
+		assert.Equal(t, "1", w.Header().Get("X"))
+		assert.Equal(t, 200, w.Code)
 	})
 }
