@@ -46,7 +46,7 @@ func (m *Upstream) logf(format string, v ...interface{}) {
 }
 
 // ServeHandler implements middleware interface
-func (m Upstream) ServeHandler(h http.Handler) http.Handler {
+func (m Upstream) ServeHandler(http.Handler) http.Handler {
 	if m.Path == "" {
 		m.Path = "/"
 	}
