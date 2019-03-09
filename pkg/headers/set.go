@@ -17,7 +17,8 @@ func SetRequest(headerpairs ...string) *RequestInterceptor {
 func SetResponse(headerpairs ...string) *ResponseInterceptor {
 	hs := buildHeaders(headerpairs)
 
-	return InterceptResponse(func(h http.Header) {
+	return InterceptResponse(func(w ResponseHeaderWriter) {
+		h := w.Header()
 		for _, p := range hs {
 			h.Set(p.Key, p.Value)
 		}
