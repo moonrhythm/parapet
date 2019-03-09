@@ -13,7 +13,8 @@ func DeleteRequest(headers ...string) *RequestInterceptor {
 
 // DeleteResponse creates new response interceptor for delete headers
 func DeleteResponse(headers ...string) *ResponseInterceptor {
-	return InterceptResponse(func(h http.Header) {
+	return InterceptResponse(func(w http.ResponseWriter, statusCode int) {
+		h := w.Header()
 		for _, p := range headers {
 			h.Del(p)
 		}

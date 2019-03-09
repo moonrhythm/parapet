@@ -24,14 +24,17 @@ func (m RequestInterceptor) ServeHandler(h http.Handler) http.Handler {
 	})
 }
 
+// ResponseInterceptFunc is the function for response's interceptor
+type ResponseInterceptFunc func(w http.ResponseWriter, statusCode int)
+
 // InterceptResponse creates new response interceptor
-func InterceptResponse(f func(http.Header)) *ResponseInterceptor {
+func InterceptResponse(f ResponseInterceptFunc) *ResponseInterceptor {
 	return &ResponseInterceptor{Intercept: f}
 }
 
 // ResponseInterceptor intercepts response's headers
 type ResponseInterceptor struct {
-	Intercept func(http.Header)
+	Intercept ResponseInterceptFunc
 }
 
 // ServeHandler implements middleware interface
@@ -44,6 +47,7 @@ func (m ResponseInterceptor) ServeHandler(h http.Handler) http.Handler {
 		nw := interceptRW{
 			ResponseWriter: w,
 			f:              m.Intercept,
+			status:         http.StatusOK,
 		}
 		defer nw.intercept()
 
@@ -54,21 +58,27 @@ func (m ResponseInterceptor) ServeHandler(h http.Handler) http.Handler {
 type interceptRW struct {
 	http.ResponseWriter
 	wroteHeader bool
-	f           func(http.Header)
+	intercepted bool
+	status      int
+	f           ResponseInterceptFunc
 }
 
 func (w *interceptRW) intercept() {
-	if w.wroteHeader {
+	if w.intercepted {
 		return
 	}
-	w.f(w.Header())
+	w.intercepted = true
+	w.f(w.ResponseWriter, w.status)
 }
 
 func (w *interceptRW) WriteHeader(statusCode int) {
+	if !w.intercepted {
+		w.status = statusCode
+		w.intercept()
+	}
 	if w.wroteHeader {
 		return
 	}
-	w.intercept()
 	w.wroteHeader = true
 	w.ResponseWriter.WriteHeader(statusCode)
 }
