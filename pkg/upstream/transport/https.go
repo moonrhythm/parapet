@@ -20,23 +20,28 @@ type HTTPS struct {
 	MaxIdleConns          int
 	IdleConnTimeout       time.Duration
 	ResponseHeaderTimeout time.Duration
-	VerifyCA              bool
+	TLSClientConfig       *tls.Config
 }
 
 // RoundTrip implement http.RoundTripper
 func (t *HTTPS) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.TCPKeepAlive == 0 {
-			t.TCPKeepAlive = time.Minute
+			t.TCPKeepAlive = defaultTCPKeepAlive
 		}
 		if t.MaxIdleConns == 0 {
-			t.MaxIdleConns = 32
+			t.MaxIdleConns = defaultMaxIdleConns
 		}
 		if t.IdleConnTimeout == 0 {
-			t.IdleConnTimeout = 10 * time.Minute
+			t.IdleConnTimeout = defaultIdleConnTimeout
 		}
 		if t.ResponseHeaderTimeout == 0 {
-			t.ResponseHeaderTimeout = 60 * time.Second
+			t.ResponseHeaderTimeout = defaultResponseHeaderTimeout
+		}
+		if t.TLSClientConfig == nil {
+			t.TLSClientConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			}
 		}
 
 		t.h = &http.Transport{
@@ -44,17 +49,14 @@ func (t *HTTPS) RoundTrip(r *http.Request) (*http.Response, error) {
 			DialContext: (&net.Dialer{
 				Timeout:   t.DialTimeout,
 				KeepAlive: t.TCPKeepAlive,
-				DualStack: true,
 			}).DialContext,
-			TLSClientConfig: &tls.Config{
-				InsecureSkipVerify: !t.VerifyCA,
-			},
+			TLSClientConfig:       t.TLSClientConfig,
 			DisableKeepAlives:     t.DisableKeepAlives,
 			MaxConnsPerHost:       t.MaxConn,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
-			TLSHandshakeTimeout:   5 * time.Second,
-			ExpectContinueTimeout: 1 * time.Second,
+			TLSHandshakeTimeout:   defaultTLSHandshakeTimeout,
+			ExpectContinueTimeout: defaultExpectContinueTimeout,
 			DisableCompression:    true,
 			ResponseHeaderTimeout: t.ResponseHeaderTimeout,
 		}

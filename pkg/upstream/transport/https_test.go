@@ -23,9 +23,7 @@ func TestHTTPS(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	tr := HTTPS{
-		VerifyCA: false,
-	}
+	tr := HTTPS{}
 	r := httptest.NewRequest("GET", "http://example.com", nil)
 	r.URL.Host = strings.TrimPrefix(ts.URL, "https://")
 	resp, err := tr.RoundTrip(r)
