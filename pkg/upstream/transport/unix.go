@@ -24,13 +24,13 @@ type Unix struct {
 func (t *Unix) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.MaxIdleConns == 0 {
-			t.MaxIdleConns = 100
+			t.MaxIdleConns = defaultMaxIdleConns
 		}
 		if t.IdleConnTimeout == 0 {
-			t.IdleConnTimeout = 10 * time.Minute
+			t.IdleConnTimeout = defaultIdleConnTimeout
 		}
 		if t.ResponseHeaderTimeout == 0 {
-			t.ResponseHeaderTimeout = 60 * time.Second
+			t.ResponseHeaderTimeout = defaultResponseHeaderTimeout
 		}
 
 		d := &net.Dialer{}
@@ -41,7 +41,7 @@ func (t *Unix) RoundTrip(r *http.Request) (*http.Response, error) {
 			DisableKeepAlives:     t.DisableKeepAlives,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
-			ExpectContinueTimeout: 1 * time.Second,
+			ExpectContinueTimeout: defaultExpectContinueTimeout,
 			DisableCompression:    true,
 			ResponseHeaderTimeout: t.ResponseHeaderTimeout,
 		}

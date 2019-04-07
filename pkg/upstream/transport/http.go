@@ -25,16 +25,16 @@ type HTTP struct {
 func (t *HTTP) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.TCPKeepAlive == 0 {
-			t.TCPKeepAlive = time.Minute
+			t.TCPKeepAlive = defaultTCPKeepAlive
 		}
 		if t.MaxIdleConns == 0 {
-			t.MaxIdleConns = 32
+			t.MaxIdleConns = defaultMaxIdleConns
 		}
 		if t.IdleConnTimeout == 0 {
-			t.IdleConnTimeout = 10 * time.Minute
+			t.IdleConnTimeout = defaultIdleConnTimeout
 		}
 		if t.ResponseHeaderTimeout == 0 {
-			t.ResponseHeaderTimeout = 60 * time.Second
+			t.ResponseHeaderTimeout = defaultResponseHeaderTimeout
 		}
 
 		t.h = &http.Transport{
@@ -42,13 +42,12 @@ func (t *HTTP) RoundTrip(r *http.Request) (*http.Response, error) {
 			DialContext: (&net.Dialer{
 				Timeout:   t.DialTimeout,
 				KeepAlive: t.TCPKeepAlive,
-				DualStack: true,
 			}).DialContext,
 			DisableKeepAlives:     t.DisableKeepAlives,
 			MaxConnsPerHost:       t.MaxConn,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
-			ExpectContinueTimeout: 1 * time.Second,
+			ExpectContinueTimeout: defaultExpectContinueTimeout,
 			DisableCompression:    true,
 			ResponseHeaderTimeout: t.ResponseHeaderTimeout,
 		}
