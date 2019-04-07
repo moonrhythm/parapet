@@ -74,12 +74,8 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			}
 		},
 		BufferPool: bytesPool,
-		Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-			resp, err := m.Transport.RoundTrip(r)
-			logger.Set(r.Context(), "upstream", r.URL.Host)
-			return resp, err
-		}),
-		ErrorLog: m.ErrorLog,
+		Transport:  &m,
+		ErrorLog:   m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			if err == context.Canceled {
 				// client canceled request
@@ -115,6 +111,13 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 	return p
 }
 
+// RoundTrip wraps transport round-trip
+func (m *Upstream) RoundTrip(r *http.Request) (*http.Response, error) {
+	resp, err := m.Transport.RoundTrip(r)
+	logger.Set(r.Context(), "upstream", r.URL.Host)
+	return resp, err
+}
+
 func singleJoiningSlash(a, b string) string {
 	aslash := strings.HasSuffix(a, "/")
 	bslash := strings.HasPrefix(b, "/")
@@ -125,12 +128,6 @@ func singleJoiningSlash(a, b string) string {
 		return a + "/" + b
 	}
 	return a + b
-}
-
-type roundTripperFunc func(r *http.Request) (*http.Response, error)
-
-func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
-	return f(r)
 }
 
 type retryContextKey struct{}
