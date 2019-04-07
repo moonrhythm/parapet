@@ -1,4 +1,4 @@
-package upstream
+package upstream_test
 
 import (
 	"bytes"
@@ -12,7 +12,17 @@ import (
 
 	"github.com/moonrhythm/parapet"
 	"github.com/moonrhythm/parapet/pkg/logger"
+
+	. "github.com/moonrhythm/parapet/pkg/upstream"
 )
+
+type mockTransport struct {
+	roundTripFunc func(*http.Request) (*http.Response, error)
+}
+
+func (t *mockTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	return t.roundTripFunc(r)
+}
 
 func TestUpstream(t *testing.T) {
 	t.Parallel()
@@ -22,14 +32,17 @@ func TestUpstream(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		called := false
-		New(roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-			w := httptest.NewRecorder()
-			w.WriteHeader(http.StatusOK)
-			w.Write([]byte("ok"))
-			called = true
-			assert.Equal(t, "/path", r.URL.Path)
-			return w.Result(), nil
-		})).ServeHandler(nil).ServeHTTP(w, r)
+		tr := &mockTransport{
+			roundTripFunc: func(r *http.Request) (*http.Response, error) {
+				w := httptest.NewRecorder()
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("ok"))
+				called = true
+				assert.Equal(t, "/path", r.URL.Path)
+				return w.Result(), nil
+			},
+		}
+		New(tr).ServeHandler(nil).ServeHTTP(w, r)
 
 		assert.True(t, called)
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -42,12 +55,14 @@ func TestUpstream(t *testing.T) {
 
 		called := false
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				called = true
-				assert.Equal(t, "/prefix/path", r.URL.Path)
-				assert.Equal(t, "1", r.URL.Query().Get("p"))
-				return httptest.NewRecorder().Result(), nil
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					called = true
+					assert.Equal(t, "/prefix/path", r.URL.Path)
+					assert.Equal(t, "1", r.URL.Query().Get("p"))
+					return httptest.NewRecorder().Result(), nil
+				},
+			},
 			Path: "/prefix",
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.True(t, called)
@@ -59,13 +74,15 @@ func TestUpstream(t *testing.T) {
 
 		called := false
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				called = true
-				assert.Equal(t, "/prefix/path", r.URL.Path)
-				assert.Equal(t, "1", r.URL.Query().Get("p"))
-				assert.Equal(t, "2", r.URL.Query().Get("q"))
-				return httptest.NewRecorder().Result(), nil
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					called = true
+					assert.Equal(t, "/prefix/path", r.URL.Path)
+					assert.Equal(t, "1", r.URL.Query().Get("p"))
+					assert.Equal(t, "2", r.URL.Query().Get("q"))
+					return httptest.NewRecorder().Result(), nil
+				},
+			},
 			Path: "/prefix?q=2",
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.True(t, called)
@@ -77,11 +94,13 @@ func TestUpstream(t *testing.T) {
 
 		called := false
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				called = true
-				assert.Equal(t, "www.google.com", r.Host)
-				return httptest.NewRecorder().Result(), nil
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					called = true
+					assert.Equal(t, "www.google.com", r.Host)
+					return httptest.NewRecorder().Result(), nil
+				},
+			},
 			Host: "www.google.com",
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.True(t, called)
@@ -92,9 +111,11 @@ func TestUpstream(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				return nil, fmt.Errorf("can not dial to server")
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					return nil, fmt.Errorf("can not dial to server")
+				},
+			},
 			Host: "www.google.com",
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.Equal(t, http.StatusBadGateway, w.Code)
@@ -107,10 +128,12 @@ func TestUpstream(t *testing.T) {
 		cnt := 0
 		start := time.Now()
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				cnt++
-				return nil, fmt.Errorf("can not dial to server")
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					cnt++
+					return nil, fmt.Errorf("can not dial to server")
+				},
+			},
 			Retries:       3,
 			BackoffFactor: 50 * time.Millisecond,
 		}.ServeHandler(nil).ServeHTTP(w, r)
@@ -124,10 +147,12 @@ func TestUpstream(t *testing.T) {
 
 		cnt := 0
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				cnt++
-				return nil, fmt.Errorf("can not dial to server")
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					cnt++
+					return nil, fmt.Errorf("can not dial to server")
+				},
+			},
 			Retries:       3,
 			BackoffFactor: 50 * time.Millisecond,
 		}.ServeHandler(nil).ServeHTTP(w, r)
@@ -140,10 +165,12 @@ func TestUpstream(t *testing.T) {
 
 		cnt := 0
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				cnt++
-				return nil, fmt.Errorf("can not dial to server")
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					cnt++
+					return nil, fmt.Errorf("can not dial to server")
+				},
+			},
 			Retries:       3,
 			BackoffFactor: 50 * time.Millisecond,
 		}.ServeHandler(nil).ServeHTTP(w, r)
@@ -155,9 +182,11 @@ func TestUpstream(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		Upstream{
-			Transport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-				return nil, ErrUnavailable
-			}),
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					return nil, ErrUnavailable
+				},
+			},
 		}.ServeHandler(nil).ServeHTTP(w, r)
 		assert.Equal(t, http.StatusServiceUnavailable, w.Code)
 	})
@@ -176,10 +205,13 @@ func TestUpstream(t *testing.T) {
 				upstreamServer, _ = logger.Get(r.Context(), "upstream").(string)
 			})
 		}))
-		ms.Use(New(roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-			r.URL.Host = "server1"
-			return httptest.NewRecorder().Result(), nil
-		})))
+		tr := &mockTransport{
+			roundTripFunc: func(r *http.Request) (*http.Response, error) {
+				r.URL.Host = "server1"
+				return httptest.NewRecorder().Result(), nil
+			},
+		}
+		ms.Use(New(tr))
 		ms.ServeHandler(nil).ServeHTTP(w, r)
 
 		assert.Equal(t, "server1", upstreamServer)
