@@ -11,6 +11,7 @@ import (
 // but run behind reverse proxy
 func New() *Server {
 	return &Server{
+		IdleTimeout:        620 * time.Second,
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		WaitBeforeShutdown: 10 * time.Second,
@@ -41,6 +42,7 @@ func NewFrontend() *Server {
 // or run behind other reverse proxy
 func NewBackend() *Server {
 	return &Server{
+		IdleTimeout:        620 * time.Second,
 		TCPKeepAlivePeriod: 3 * time.Minute,
 		GraceTimeout:       30 * time.Second,
 		WaitBeforeShutdown: 10 * time.Second,
