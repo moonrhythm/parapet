@@ -99,7 +99,7 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 
 			m.logf("upstream: %v", err)
 			switch err {
-			case ErrUnavailable:
+			case ErrUnavailable: // load balancer don't have next upstream
 				http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
 			// TODO: timeout is unexposed from http (transport) package
 			default:
@@ -133,21 +133,20 @@ func singleJoiningSlash(a, b string) string {
 type retryContextKey struct{}
 
 func canRetry(r *http.Request) bool {
-	if !isIdempotent(r.Method) {
+	if !canMethodRetry(r.Method) {
 		return false
 	}
 
 	return r.Body == http.NoBody || r.Body == nil
 }
 
-func isIdempotent(method string) bool {
+func canMethodRetry(method string) bool {
 	switch method {
 	case
 		http.MethodGet,
 		http.MethodHead,
 		http.MethodOptions,
-		http.MethodPut,
-		http.MethodDelete:
+		http.MethodTrace:
 		return true
 	default:
 		return false
