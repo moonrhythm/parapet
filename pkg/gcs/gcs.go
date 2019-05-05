@@ -25,10 +25,12 @@ func New(client *storage.Client, bucket string, basePath string) *GCS {
 
 // GCS proxies request to google cloud storage
 type GCS struct {
-	Client   *storage.Client
-	Bucket   string
-	BasePath string
-	Fallback http.Handler
+	Client       *storage.Client
+	Bucket       string
+	BasePath     string
+	MainPage     string
+	NotFoundPage string
+	Fallback     http.Handler
 }
 
 // ServeHandler implements middleware interface
@@ -64,28 +66,45 @@ func (m GCS) ServeHandler(h http.Handler) http.Handler {
 	m.BasePath = strings.TrimPrefix(m.BasePath, "/")
 	m.BasePath = strings.TrimSuffix(m.BasePath, "/")
 
+	// normalize pages
+	m.MainPage = strings.TrimSpace(m.MainPage)
+	m.NotFoundPage = strings.TrimSpace(m.NotFoundPage)
+
 	bucket := m.Client.Bucket(m.Bucket)
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		obj := bucket.Object(strings.TrimPrefix(path.Join(m.BasePath, r.URL.Path), "/"))
+	var serve func(http.ResponseWriter, *http.Request, string, bool)
+	serve = func(w http.ResponseWriter, r *http.Request, p string, fallbackNotFound bool) {
+		obj := bucket.Object(strings.TrimPrefix(path.Join(m.BasePath, p), "/"))
 
 		reader, err := obj.NewReader(r.Context())
 		if err != nil {
+			if fallbackNotFound && m.NotFoundPage != "" {
+				serve(w, r, m.NotFoundPage, false)
+				return
+			}
 			m.Fallback.ServeHTTP(w, r)
 			return
 		}
 		defer reader.Close()
 
 		h := w.Header()
-		if v := reader.ContentType(); v != "" {
+		if v := reader.Attrs.ContentType; v != "" {
 			h.Set("Content-Type", v)
 		}
-		if v := reader.CacheControl(); v != "" {
+		if v := reader.Attrs.CacheControl; v != "" {
 			h.Set("Cache-Control", v)
 		}
 
 		b := pool.Get()
 		defer pool.Put(b)
 		io.CopyBuffer(w, reader, b)
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if r.URL.Path == "/" && m.MainPage != "" {
+			p = m.MainPage
+		}
+		serve(w, r, p, true)
 	})
 }
