@@ -24,6 +24,9 @@ type HTTP struct {
 // RoundTrip implement http.RoundTripper
 func (t *HTTP) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
+		if t.DialTimeout == 0 {
+			t.DialTimeout = defaultDialTimeout
+		}
 		if t.TCPKeepAlive == 0 {
 			t.TCPKeepAlive = defaultTCPKeepAlive
 		}

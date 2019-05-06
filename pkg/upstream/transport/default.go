@@ -5,6 +5,7 @@ import (
 )
 
 const (
+	defaultDialTimeout           = 5 * time.Second
 	defaultMaxIdleConns          = 32
 	defaultTCPKeepAlive          = time.Minute
 	defaultIdleConnTimeout       = 10 * time.Minute
