@@ -177,8 +177,12 @@ func (s *Server) Shutdown() error {
 	// wait for service to de-registered
 	time.Sleep(s.WaitBeforeShutdown)
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.GraceTimeout)
-	defer cancel()
+	ctx := context.Background()
+	if s.GraceTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.GraceTimeout)
+		defer cancel()
+	}
 
 	return s.s.Shutdown(ctx)
 }
