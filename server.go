@@ -2,6 +2,7 @@ package parapet
 
 import (
 	"context"
+	"crypto/tls"
 	"log"
 	"net"
 	"net/http"
@@ -39,6 +40,7 @@ type Server struct {
 	H2C                bool
 	ReusePort          bool
 	ConnState          func(conn net.Conn, state http.ConnState)
+	TLSConfig          *tls.Config
 }
 
 type serverContextKey struct{}
@@ -71,6 +73,7 @@ func (s *Server) configServer() {
 	s.s.WriteTimeout = s.WriteTimeout
 	s.s.IdleTimeout = s.IdleTimeout
 	s.s.ErrorLog = s.ErrorLog
+	s.s.TLSConfig = s.TLSConfig
 }
 
 func (s *Server) configHandler() {
@@ -121,7 +124,11 @@ func (s *Server) ListenAndServe() error {
 func (s *Server) listenAndServe() error {
 	addr := s.Addr
 	if addr == "" {
-		addr = ":http"
+		if s.isTLS() {
+			addr = ":443"
+		} else {
+			addr = ":http"
+		}
 	}
 
 	var ln net.Listener
@@ -154,6 +161,10 @@ func (s *Server) listenAndServe() error {
 func (s *Server) Serve(l net.Listener) error {
 	s.configServer()
 
+	if s.isTLS() {
+		return s.s.ServeTLS(l, "", "")
+	}
+
 	return s.s.Serve(l)
 }
 
@@ -166,8 +177,12 @@ func (s *Server) Shutdown() error {
 	// wait for service to de-registered
 	time.Sleep(s.WaitBeforeShutdown)
 
-	ctx, cancel := context.WithTimeout(context.Background(), s.GraceTimeout)
-	defer cancel()
+	ctx := context.Background()
+	if s.GraceTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, s.GraceTimeout)
+		defer cancel()
+	}
 
 	return s.s.Shutdown(ctx)
 }
@@ -180,4 +195,8 @@ func (s *Server) RegisterOnShutdown(f func()) {
 // ModifyConnection modifies connection before send to http
 func (s *Server) ModifyConnection(f func(conn net.Conn) net.Conn) {
 	s.modifyConn = append(s.modifyConn, f)
+}
+
+func (s *Server) isTLS() bool {
+	return s.TLSConfig != nil
 }
