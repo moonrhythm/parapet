@@ -2,36 +2,52 @@ package prom
 
 import (
 	"net"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/moonrhythm/parapet"
 )
 
+type networks struct {
+	once      sync.Once
+	requests  prometheus.Counter
+	responses prometheus.Counter
+}
+
+var _networks networks
+
+func (p *networks) init() {
+	p.once.Do(func() {
+		p.requests = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "network_request_bytes",
+		})
+		p.responses = prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "network_response_bytes",
+		})
+		reg.MustRegister(p.requests, p.responses)
+	})
+}
+
+func (p *networks) read(n int) {
+	p.requests.Add(float64(n))
+}
+
+func (p *networks) write(n int) {
+	p.responses.Add(float64(n))
+}
+
 // Networks tracks network io
 func Networks(s *parapet.Server) {
-	requests := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: Namespace,
-		Name:      "network_request_bytes",
-	})
-	responses := prometheus.NewCounter(prometheus.CounterOpts{
-		Namespace: Namespace,
-		Name:      "network_response_bytes",
-	})
-	reg.MustRegister(requests, responses)
-
-	read := func(n int) {
-		requests.Add(float64(n))
-	}
-	write := func(n int) {
-		responses.Add(float64(n))
-	}
+	_networks.init()
 
 	s.ModifyConnection(func(conn net.Conn) net.Conn {
 		return &connNetTrack{
 			Conn:    conn,
-			onRead:  read,
-			onWrite: write,
+			onRead:  _networks.read,
+			onWrite: _networks.write,
 		}
 	})
 }

@@ -3,41 +3,57 @@ package prom
 import (
 	"net/http"
 	"strconv"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/moonrhythm/parapet"
 )
 
+type requests struct {
+	once sync.Once
+	vec  *prometheus.CounterVec
+}
+
+var _requests requests
+
+func (p *requests) init() {
+	p.once.Do(func() {
+		p.vec = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "requests",
+		}, []string{"host", "status", "method"})
+		reg.MustRegister(p.vec)
+	})
+}
+
+func (p *requests) ServeHandler(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		l := prometheus.Labels{
+			"method": r.Method,
+			"host":   r.Host,
+		}
+		nw := requestTrackRW{
+			ResponseWriter: w,
+		}
+		defer func() {
+			l["status"] = strconv.Itoa(nw.status)
+			counter, err := p.vec.GetMetricWith(l)
+			if err != nil {
+				return
+			}
+			counter.Inc()
+		}()
+
+		h.ServeHTTP(&nw, r)
+	})
+}
+
 // Requests collects request count
 func Requests() parapet.Middleware {
-	requests := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: Namespace,
-		Name:      "requests",
-	}, []string{"host", "status", "method"})
-	reg.MustRegister(requests)
+	_requests.init()
 
-	return parapet.MiddlewareFunc(func(h http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			l := prometheus.Labels{
-				"method": r.Method,
-				"host":   r.Host,
-			}
-			nw := requestTrackRW{
-				ResponseWriter: w,
-			}
-			defer func() {
-				l["status"] = strconv.Itoa(nw.status)
-				counter, err := requests.GetMetricWith(l)
-				if err != nil {
-					return
-				}
-				counter.Inc()
-			}()
-
-			h.ServeHTTP(&nw, r)
-		})
-	})
+	return &_requests
 }
 
 type requestTrackRW struct {
