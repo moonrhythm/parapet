@@ -119,8 +119,8 @@ func firstHost(s string) string {
 func parseCIDRs(xs []string) []*net.IPNet {
 	var rs []*net.IPNet
 	for _, x := range xs {
-		_, n, err := net.ParseCIDR(x)
-		if err != nil {
+		_, n, _ := net.ParseCIDR(x)
+		if n != nil {
 			rs = append(rs, n)
 		}
 	}
