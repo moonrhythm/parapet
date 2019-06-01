@@ -71,3 +71,13 @@ func TestProxyTrust(t *testing.T) {
 	}).ServeHTTP(w, r)
 	assert.True(t, called)
 }
+
+func TestParseCIDRs(t *testing.T) {
+	t.Parallel()
+
+	ns := parseCIDRs([]string{"1.1.1.1/32", "8.8.0.0/16"})
+	if assert.Len(t, ns, 2) {
+		assert.Equal(t, "1.1.1.1/32", ns[0].String())
+		assert.Equal(t, "8.8.0.0/16", ns[1].String())
+	}
+}
