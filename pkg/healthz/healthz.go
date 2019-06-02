@@ -1,6 +1,7 @@
 package healthz
 
 import (
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -9,11 +10,16 @@ import (
 )
 
 // Healthz middleware
-type Healthz struct{}
+type Healthz struct {
+	Path string
+	Host bool // allow request with Host header
+}
 
 // New creates new healthz
 func New() *Healthz {
-	return new(Healthz)
+	return &Healthz{
+		Path: "/healthz",
+	}
 }
 
 // ServeHandler implements middleware interface
@@ -31,6 +37,23 @@ func (m Healthz) ServeHandler(h http.Handler) http.Handler {
 				})
 			}
 		})
+
+		if !m.Host {
+			requestHost, _, _ := net.SplitHostPort(r.Host)
+			if requestHost == "" {
+				requestHost = r.Host
+			}
+			ip := net.ParseIP(requestHost)
+			if ip == nil {
+				h.ServeHTTP(w, r)
+				return
+			}
+		}
+
+		if r.URL.Path != m.Path {
+			h.ServeHTTP(w, r)
+			return
+		}
 
 		if r.URL.Query().Get("ready") != "" {
 			p := atomic.LoadInt32(&shutdown)

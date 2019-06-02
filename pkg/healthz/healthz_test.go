@@ -18,20 +18,35 @@ func TestHealthz(t *testing.T) {
 	s := parapet.Server{
 		Addr:               ":10100",
 		WaitBeforeShutdown: 200 * time.Millisecond,
+		Handler:            http.NotFoundHandler(),
 	}
 	defer s.Shutdown()
 	s.Use(m)
 	go s.ListenAndServe()
 	time.Sleep(50 * time.Millisecond)
 
-	// liveness
+	// not found
 	resp, err := http.Get("http://127.0.0.1:10100")
+	if assert.NoError(t, err) {
+		assert.EqualValues(t, http.StatusNotFound, resp.StatusCode)
+	}
+
+	// with host
+	req, _ := http.NewRequest("GET", "http://127.0.0.1:10100/healthz", nil)
+	req.Host = "localhost"
+	resp, err = http.DefaultClient.Do(req)
+	if assert.NoError(t, err) {
+		assert.EqualValues(t, http.StatusNotFound, resp.StatusCode)
+	}
+
+	// liveness
+	resp, err = http.Get("http://127.0.0.1:10100/healthz")
 	if assert.NoError(t, err) {
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 	}
 
 	// readiness
-	resp, err = http.Get("http://127.0.0.1:10100?ready=1")
+	resp, err = http.Get("http://127.0.0.1:10100/healthz?ready=1")
 	if assert.NoError(t, err) {
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 	}
@@ -40,13 +55,13 @@ func TestHealthz(t *testing.T) {
 	time.Sleep(20 * time.Millisecond)
 
 	// liveness while shutdown
-	resp, err = http.Get("http://127.0.0.1:10100")
+	resp, err = http.Get("http://127.0.0.1:10100/healthz")
 	if assert.NoError(t, err) {
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 	}
 
 	// readiness while shutdown
-	resp, err = http.Get("http://127.0.0.1:10100?ready=1")
+	resp, err = http.Get("http://127.0.0.1:10100/healthz?ready=1")
 	if assert.NoError(t, err) {
 		assert.EqualValues(t, http.StatusServiceUnavailable, resp.StatusCode)
 	}
