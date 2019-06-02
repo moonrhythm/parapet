@@ -11,10 +11,12 @@ import (
 
 // Healthz middleware
 type Healthz struct {
-	Path    string
-	Host    bool // allow request with Host header
-	ready   int32
-	healthy int32
+	Path     string
+	Host     bool // allow request with Host header
+	ready    int32
+	healthy  int32
+	shutdown int32
+	once     sync.Once
 }
 
 // New creates new healthz
@@ -46,16 +48,11 @@ func (m *Healthz) Set(healthy bool) {
 
 // ServeHandler implements middleware interface
 func (m *Healthz) ServeHandler(h http.Handler) http.Handler {
-	var (
-		once     sync.Once
-		shutdown int32
-	)
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		once.Do(func() {
+		m.once.Do(func() {
 			if srv, ok := r.Context().Value(parapet.ServerContextKey).(*parapet.Server); ok {
 				srv.RegisterOnShutdown(func() {
-					atomic.StoreInt32(&shutdown, 1)
+					atomic.StoreInt32(&m.shutdown, 1)
 				})
 			}
 		})
@@ -80,7 +77,7 @@ func (m *Healthz) ServeHandler(h http.Handler) http.Handler {
 		var ok bool
 
 		if r.URL.Query().Get("ready") != "" {
-			localShutdown := atomic.LoadInt32(&shutdown)
+			localShutdown := atomic.LoadInt32(&m.shutdown)
 			localReady := atomic.LoadInt32(&m.ready)
 			ok = localShutdown == 0 && localReady > 0
 		} else {
