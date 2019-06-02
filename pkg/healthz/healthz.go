@@ -11,19 +11,41 @@ import (
 
 // Healthz middleware
 type Healthz struct {
-	Path string
-	Host bool // allow request with Host header
+	Path    string
+	Host    bool // allow request with Host header
+	ready   int32
+	healthy int32
 }
 
 // New creates new healthz
 func New() *Healthz {
 	return &Healthz{
-		Path: "/healthz",
+		Path:    "/healthz",
+		ready:   1,
+		healthy: 1,
 	}
 }
 
+// SetReady sets ready state
+func (m *Healthz) SetReady(ready bool) {
+	var val int32
+	if ready {
+		val = 1
+	}
+	atomic.StoreInt32(&m.ready, val)
+}
+
+// SetLive sets healthy state
+func (m *Healthz) Set(healthy bool) {
+	var val int32
+	if healthy {
+		val = 1
+	}
+	atomic.StoreInt32(&m.healthy, val)
+}
+
 // ServeHandler implements middleware interface
-func (m Healthz) ServeHandler(h http.Handler) http.Handler {
+func (m *Healthz) ServeHandler(h http.Handler) http.Handler {
 	var (
 		once     sync.Once
 		shutdown int32
@@ -55,13 +77,21 @@ func (m Healthz) ServeHandler(h http.Handler) http.Handler {
 			return
 		}
 
+		var ok bool
+
 		if r.URL.Query().Get("ready") != "" {
-			p := atomic.LoadInt32(&shutdown)
-			if p > 0 {
-				w.WriteHeader(http.StatusServiceUnavailable)
-				w.Write([]byte("Service Unavailable"))
-				return
-			}
+			localShutdown := atomic.LoadInt32(&shutdown)
+			localReady := atomic.LoadInt32(&m.ready)
+			ok = localShutdown == 0 && localReady > 0
+		} else {
+			localLive := atomic.LoadInt32(&m.healthy)
+			ok = localLive > 0
+		}
+
+		if !ok {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			w.Write([]byte("Service Unavailable"))
+			return
 		}
 
 		w.WriteHeader(http.StatusOK)

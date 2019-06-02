@@ -45,11 +45,27 @@ func TestHealthz(t *testing.T) {
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 	}
 
+	// liveness false
+	m.Set(false)
+	resp, err = http.Get("http://127.0.0.1:10100/healthz")
+	if assert.NoError(t, err) {
+		assert.EqualValues(t, http.StatusServiceUnavailable, resp.StatusCode)
+	}
+	m.Set(true)
+
 	// readiness
 	resp, err = http.Get("http://127.0.0.1:10100/healthz?ready=1")
 	if assert.NoError(t, err) {
 		assert.EqualValues(t, http.StatusOK, resp.StatusCode)
 	}
+
+	// readiness false
+	m.SetReady(false)
+	resp, err = http.Get("http://127.0.0.1:10100/healthz?ready=1")
+	if assert.NoError(t, err) {
+		assert.EqualValues(t, http.StatusServiceUnavailable, resp.StatusCode)
+	}
+	m.SetReady(true)
 
 	go s.Shutdown()
 	time.Sleep(20 * time.Millisecond)
