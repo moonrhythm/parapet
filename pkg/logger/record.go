@@ -2,12 +2,14 @@ package logger
 
 import (
 	"context"
+	"sync"
 	"time"
 )
 
 type ctxKeyRecord struct{}
 
 type record struct {
+	mu      sync.RWMutex
 	disable bool
 	data    map[string]interface{}
 }
@@ -17,19 +19,26 @@ func newRecord() *record {
 }
 
 func (r *record) Set(name string, value interface{}) {
+	r.mu.Lock()
 	r.data[name] = value
+	r.mu.Unlock()
 }
 
 func (r *record) Get(name string) interface{} {
-	return r.data[name]
+	r.mu.RLock()
+	x := r.data[name]
+	r.mu.RUnlock()
+	return x
 }
 
 func (r *record) omitEmpty() {
+	r.mu.Lock()
 	for k, v := range r.data {
 		if isEmpty(v) {
 			delete(r.data, k)
 		}
 	}
+	r.mu.Unlock()
 }
 
 func isEmpty(v interface{}) bool {
