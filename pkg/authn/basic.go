@@ -33,6 +33,7 @@ func (m BasicAuthenticator) ServeHandler(h http.Handler) http.Handler {
 		Type: t,
 		Authenticate: func(r *http.Request) bool {
 			username, password, ok := r.BasicAuth()
+			r.Header.Del("Authorization")
 			if !ok {
 				return false
 			}

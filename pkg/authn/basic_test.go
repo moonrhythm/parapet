@@ -43,6 +43,7 @@ func TestBasic(t *testing.T) {
 		r.SetBasicAuth("root", "pass")
 		w := httptest.NewRecorder()
 		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Empty(t, r.Header.Get("Authorization"))
 			w.WriteHeader(http.StatusOK)
 		})).ServeHTTP(w, r)
 		assert.Equal(t, http.StatusOK, w.Code)
