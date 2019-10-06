@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -91,14 +90,13 @@ func (s *Server) configHandler() {
 		h = func(h http.Handler) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
 				if s.h3s != nil {
-					hh := make(http.Header)
-					s.h3s.SetQuicHeaders(hh)
+					s.h3s.SetQuicHeaders(w.Header())
 
-					p := hh.Get("Alt-Svc")
+					p := w.Header().Get("Alt-Svc")
 					if s.H3IP != "" {
-						p = `quic="` + s.H3IP + strings.TrimPrefix(p, `quic="`)
+						p = `quic="` + s.H3IP + p[6:]
 					}
-					w.Header().Add("Alt-Svc", p)
+					w.Header().Set("Alt-Svc", p)
 				}
 
 				ctx := context.WithValue(r.Context(), ServerContextKey, s)
