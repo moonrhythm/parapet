@@ -8,6 +8,7 @@ require (
 	github.com/gofrs/uuid v3.2.0+incompatible
 	github.com/google/brotli v1.0.7
 	github.com/kavu/go_reuseport v1.4.0
+	github.com/lucas-clemente/quic-go v0.12.0
 	github.com/prometheus/client_golang v0.9.3-0.20190127221311-3c4408c8b829
 	github.com/stretchr/testify v1.3.0
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80

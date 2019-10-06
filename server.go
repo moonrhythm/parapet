@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/kavu/go_reuseport"
+	"github.com/lucas-clemente/quic-go/http3"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 )
@@ -20,6 +22,7 @@ import (
 // Server is the parapet server
 type Server struct {
 	s          http.Server
+	h3s        *http3.Server
 	once       sync.Once
 	trackState sync.Once
 	ms         Middlewares
@@ -27,6 +30,8 @@ type Server struct {
 	modifyConn []func(conn net.Conn) net.Conn
 
 	Addr               string
+	H3Addr             string
+	H3IP               string
 	Handler            http.Handler
 	ReadTimeout        time.Duration
 	ReadHeaderTimeout  time.Duration
@@ -85,6 +90,17 @@ func (s *Server) configHandler() {
 		}
 		h = func(h http.Handler) http.HandlerFunc {
 			return func(w http.ResponseWriter, r *http.Request) {
+				if s.h3s != nil {
+					hh := make(http.Header)
+					s.h3s.SetQuicHeaders(hh)
+
+					p := hh.Get("Alt-Svc")
+					if s.H3IP != "" {
+						p = `quic="` + s.H3IP + strings.TrimPrefix(p, `quic="`)
+					}
+					w.Header().Add("Alt-Svc", p)
+				}
+
 				ctx := context.WithValue(r.Context(), ServerContextKey, s)
 				h.ServeHTTP(w, r.WithContext(ctx))
 			}
@@ -98,17 +114,23 @@ func (s *Server) configHandler() {
 
 // ListenAndServe starts web server
 func (s *Server) ListenAndServe() error {
-	if s.GraceTimeout <= 0 {
-		return s.listenAndServe()
-	}
-
-	errChan := make(chan error)
+	errChan := make(chan error, 2)
 
 	go func() {
 		if err := s.listenAndServe(); err != http.ErrServerClosed {
 			errChan <- err
 		}
 	}()
+
+	go func() {
+		if err := s.listenAndServeH3(); err != nil {
+			errChan <- err
+		}
+	}()
+
+	if s.GraceTimeout <= 0 {
+		return <-errChan
+	}
 
 	shutdown := make(chan os.Signal, 1)
 	signal.Notify(shutdown, syscall.SIGTERM)
@@ -157,6 +179,47 @@ func (s *Server) listenAndServe() error {
 	return s.Serve(ln)
 }
 
+func (s *Server) listenAndServeH3() error {
+	if s.H3Addr == "" || s.TLSConfig == nil {
+		return nil
+	}
+
+	s.configHandler()
+
+	udpAddr, err := net.ResolveUDPAddr("udp", s.H3Addr)
+	if err != nil {
+		return err
+	}
+
+	var conn net.PacketConn
+	conn, err = net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		return err
+	}
+
+	// if len(s.modifyConn) > 0 {
+	// 	conn = &modifyConnListener{
+	// 		Listener:   conn,
+	// 		ModifyConn: s.modifyConn,
+	// 	}
+	// }
+
+	s.h3s = &http3.Server{
+		Server: &http.Server{
+			Handler:           s,
+			TLSConfig:         s.TLSConfig,
+			ReadTimeout:       s.ReadTimeout,
+			ReadHeaderTimeout: s.ReadHeaderTimeout,
+			WriteTimeout:      s.WriteTimeout,
+			IdleTimeout:       s.IdleTimeout,
+			ConnState:         s.ConnState,
+			ErrorLog:          s.ErrorLog,
+		},
+		QuicConfig: nil,
+	}
+	return s.h3s.Serve(conn)
+}
+
 // Serve serves incoming connections
 func (s *Server) Serve(l net.Listener) error {
 	s.configServer()
@@ -182,6 +245,10 @@ func (s *Server) Shutdown() error {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, s.GraceTimeout)
 		defer cancel()
+	}
+
+	if s.h3s != nil {
+		go s.h3s.CloseGracefully(s.GraceTimeout)
 	}
 
 	return s.s.Shutdown(ctx)
