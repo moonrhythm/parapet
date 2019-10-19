@@ -170,12 +170,12 @@ func (s *Server) Serve(l net.Listener) error {
 
 // Shutdown gracefully shutdowns server
 func (s *Server) Shutdown() error {
+	// wait for service to de-registered
+	time.Sleep(s.WaitBeforeShutdown)
+
 	for _, f := range s.onShutdown {
 		go f()
 	}
-
-	// wait for service to de-registered
-	time.Sleep(s.WaitBeforeShutdown)
 
 	ctx := context.Background()
 	if s.GraceTimeout > 0 {
@@ -187,7 +187,7 @@ func (s *Server) Shutdown() error {
 	return s.s.Shutdown(ctx)
 }
 
-// RegisterOnShutdown calls f when server received SIGTERM
+// RegisterOnShutdown calls f when server received SIGTERM, after WaitBeforeShutdown
 func (s *Server) RegisterOnShutdown(f func()) {
 	s.onShutdown = append(s.onShutdown, f)
 }
