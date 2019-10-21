@@ -58,6 +58,9 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 		d.Set("realIp", realIP)
 		d.Set("forwardedFor", xff)
 
+		ctx := r.Context()
+		ctx = context.WithValue(ctx, ctxKeyRecord{}, d)
+
 		nw := responseWriter{ResponseWriter: w}
 		defer func() {
 			if d.disable {
@@ -65,19 +68,20 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 			}
 
 			duration := time.Since(start)
+			status := nw.statusCode
+			if status == 0 && ctx.Err() == context.Canceled {
+				status = 499
+			}
+
 			d.Set("duration", duration.Nanoseconds())
 			d.Set("durationHuman", duration.String())
-			d.Set("status", nw.statusCode)
+			d.Set("status", status)
 			d.Set("responseBodySize", nw.length)
 
 			d.omitEmpty()
 			json.NewEncoder(m.Writer).Encode(d.data)
 		}()
-
-		ctx := r.Context()
-		ctx = context.WithValue(ctx, ctxKeyRecord{}, d)
-		r = r.WithContext(ctx)
-		h.ServeHTTP(&nw, r)
+		h.ServeHTTP(&nw, r.WithContext(ctx))
 	})
 }
 
