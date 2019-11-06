@@ -10,6 +10,7 @@ import (
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/trace"
 	"go.opencensus.io/trace/propagation"
+	"google.golang.org/api/option"
 )
 
 // New creates new trace middleware
@@ -19,13 +20,15 @@ func New() *Trace {
 
 // Trace middleware
 type Trace struct {
-	ProjectID            string
-	Propagation          propagation.HTTPFormat
-	BundleCountThreshold int
-	BundleDelayThreshold time.Duration
-	IsPublicEndpoint     bool
-	FormatSpanName       func(r *http.Request) string
-	StartOptions         trace.StartOptions
+	ProjectID               string
+	Propagation             propagation.HTTPFormat
+	BundleCountThreshold    int
+	BundleDelayThreshold    time.Duration
+	IsPublicEndpoint        bool
+	FormatSpanName          func(r *http.Request) string
+	StartOptions            trace.StartOptions
+	MonitoringClientOptions []option.ClientOption
+	TraceClientOptions      []option.ClientOption
 }
 
 // ServeHandler implements middleware interface
@@ -47,9 +50,11 @@ func (m Trace) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	exporter, err := stackdriver.NewExporter(stackdriver.Options{
-		ProjectID:            m.ProjectID,
-		BundleCountThreshold: m.BundleCountThreshold,
-		BundleDelayThreshold: m.BundleDelayThreshold,
+		ProjectID:               m.ProjectID,
+		BundleCountThreshold:    m.BundleCountThreshold,
+		BundleDelayThreshold:    m.BundleDelayThreshold,
+		MonitoringClientOptions: m.MonitoringClientOptions,
+		TraceClientOptions:      m.TraceClientOptions,
 	})
 	if err != nil {
 		log.Println("stackdriver/trace:", err)
