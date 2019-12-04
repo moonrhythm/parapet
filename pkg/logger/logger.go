@@ -67,7 +67,8 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 				return
 			}
 
-			duration := time.Since(start)
+			now := time.Now()
+			duration := now.Sub(start)
 			status := nw.statusCode
 			if status == 0 && ctx.Err() == context.Canceled {
 				status = 499
@@ -78,6 +79,12 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 			d.Set("status", status)
 			d.Set("responseBodySize", nw.length)
 
+			if !nw.wroteHeaderAt.IsZero() {
+				durationHeader := now.Sub(nw.wroteHeaderAt)
+				d.Set("durationHeader", durationHeader.Nanoseconds())
+				d.Set("durationHeaderHuman", durationHeader.String())
+			}
+
 			d.omitEmpty()
 			json.NewEncoder(m.Writer).Encode(d.data)
 		}()
@@ -87,9 +94,10 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 
 type responseWriter struct {
 	http.ResponseWriter
-	wroteHeader bool
-	statusCode  int
-	length      int64
+	wroteHeader   bool
+	wroteHeaderAt time.Time
+	statusCode    int
+	length        int64
 }
 
 func (w *responseWriter) WriteHeader(statusCode int) {
@@ -97,6 +105,7 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 		return
 	}
 	w.wroteHeader = true
+	w.wroteHeaderAt = time.Now()
 	w.statusCode = statusCode
 	w.ResponseWriter.WriteHeader(statusCode)
 }
