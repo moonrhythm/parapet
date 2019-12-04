@@ -67,8 +67,12 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 				return
 			}
 
-			duration := time.Since(start)
-			durationHeader := time.Since(nw.wroteHeaderAt)
+			now := time.Now()
+			duration := now.Sub(start)
+			durationHeader := now.Sub(nw.wroteHeaderAt)
+			if durationHeader < 0 {
+				durationHeader = 0
+			}
 			status := nw.statusCode
 			if status == 0 && ctx.Err() == context.Canceled {
 				status = 499
