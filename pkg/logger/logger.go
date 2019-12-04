@@ -69,10 +69,6 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 
 			now := time.Now()
 			duration := now.Sub(start)
-			durationHeader := now.Sub(nw.wroteHeaderAt)
-			if durationHeader < 0 {
-				durationHeader = 0
-			}
 			status := nw.statusCode
 			if status == 0 && ctx.Err() == context.Canceled {
 				status = 499
@@ -80,10 +76,14 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 
 			d.Set("duration", duration.Nanoseconds())
 			d.Set("durationHuman", duration.String())
-			d.Set("durationHeader", durationHeader.Nanoseconds())
-			d.Set("durationHeaderHuman", durationHeader.String())
 			d.Set("status", status)
 			d.Set("responseBodySize", nw.length)
+
+			if !nw.wroteHeaderAt.IsZero() {
+				durationHeader := now.Sub(nw.wroteHeaderAt)
+				d.Set("durationHeader", durationHeader.Nanoseconds())
+				d.Set("durationHeaderHuman", durationHeader.String())
+			}
 
 			d.omitEmpty()
 			json.NewEncoder(m.Writer).Encode(d.data)
