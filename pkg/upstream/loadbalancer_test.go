@@ -1,4 +1,4 @@
-package loadbalancer_test
+package upstream
 
 import (
 	"net/http"
@@ -6,26 +6,23 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/moonrhythm/parapet/pkg/upstream"
-	. "github.com/moonrhythm/parapet/pkg/upstream/loadbalancer"
 )
 
-func TestRoundRobin(t *testing.T) {
+func TestRoundRobinLoadBalancer(t *testing.T) {
 	t.Parallel()
 
 	t.Run("Empty", func(t *testing.T) {
-		l := NewRoundRobin(nil)
+		l := NewRoundRobinLoadBalancer(nil)
 		r := httptest.NewRequest("GET", "/", nil)
 		resp, err := l.RoundTrip(r)
 		assert.Nil(t, resp)
 		assert.Error(t, err)
-		assert.Equal(t, upstream.ErrUnavailable, err)
+		assert.Equal(t, ErrUnavailable, err)
 	})
 
 	t.Run("One target", func(t *testing.T) {
 		tr := &fakeTransport{}
-		l := NewRoundRobin([]*Target{{Host: "upstream1", Transport: tr}})
+		l := NewRoundRobinLoadBalancer([]*Target{{Host: "upstream1", Transport: tr}})
 
 		r := httptest.NewRequest("GET", "/", nil)
 		resp, err := l.RoundTrip(r)
@@ -46,7 +43,7 @@ func TestRoundRobin(t *testing.T) {
 	t.Run("Two targets", func(t *testing.T) {
 		tr0 := &fakeTransport{}
 		tr1 := &fakeTransport{}
-		l := NewRoundRobin([]*Target{
+		l := NewRoundRobinLoadBalancer([]*Target{
 			{Host: "upstream0", Transport: tr0},
 			{Host: "upstream1", Transport: tr1},
 		})

@@ -1,4 +1,4 @@
-package trace
+package stackdriver
 
 import (
 	"log"
@@ -13,8 +13,8 @@ import (
 	"google.golang.org/api/option"
 )
 
-// New creates new trace middleware
-func New() *Trace {
+// NewTrace creates new stack driver trace middleware
+func NewTrace() *Trace {
 	return new(Trace)
 }
 

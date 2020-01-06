@@ -28,8 +28,6 @@ import (
 	"github.com/moonrhythm/parapet/pkg/redirect"
 	"github.com/moonrhythm/parapet/pkg/requestid"
 	"github.com/moonrhythm/parapet/pkg/upstream"
-	"github.com/moonrhythm/parapet/pkg/upstream/transport"
-	"github.com/moonrhythm/parapet/pkg/upstream/loadbalancer"
 )
 
 func main() {
@@ -70,10 +68,10 @@ func example() parapet.Middleware {
 	h.Use(redirect.HTTPS())
 	h.Use(hsts.Preload())
 	h.Use(redirect.NonWWW())
-	h.Use(upstream.New(loadbalancer.NewRoundRobin([]*loadbalancer.Target{
-		{Host: "example.default.svc.cluster.local:8080", Transport: &transport.HTTP{}},
-		{Host: "example1.default.svc.cluster.local:8080", Transport: &transport.H2C{}},
-		{Host: "myexamplebackuphost.com", Transport: &transport.HTTPS{}},
+	h.Use(upstream.New(upstream.NewRoundRobinLoadBalancer([]*upstream.Target{
+		{Host: "example.default.svc.cluster.local:8080", Transport: &upstream.HTTPTransport{}},
+		{Host: "example1.default.svc.cluster.local:8080", Transport: &upstream.H2CTransport{}},
+		{Host: "myexamplebackuphost.com", Transport: &upstream.HTTPSTransport{}},
 	})))
 	
 	return h
@@ -99,7 +97,7 @@ func mysite() parapet.Middleware {
 			"x-goog-stored-content-length",
 			"x-guploader-uploadid",
 		))
-		h.Use(upstream.SingleHost("storage.googleapis.com", &transport.HTTPS{}))
+		h.Use(upstream.SingleHost("storage.googleapis.com", &upstream.HTTPSTransport{}))
 	
 		hs.Use(h)
 	}
@@ -123,7 +121,7 @@ func wordpress() parapet.Middleware {
 	h.Use(hsts.Preload())
 	h.Use(redirect.NonWWW())
 	
-	backend := upstream.SingleHost("wordpress.default.svc.cluster.local", &transport.HTTP{})
+	backend := upstream.SingleHost("wordpress.default.svc.cluster.local", &upstream.HTTPTransport{})
 	
 	l := location.RegExp(`\.(js|css|svg|png|jp(e)?g|gif)$`)
 	l.Use(headers.SetResponse("Cache-Control", "public, max-age=31536000"))
