@@ -12,6 +12,6 @@ require (
 	github.com/stretchr/testify v1.4.0
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
 	go.opencensus.io v0.22.2
-	golang.org/x/net v0.0.0-20191209160850-c0dbc17a3553
+	golang.org/x/net v0.0.0-20200219183655-46282727080f
 	google.golang.org/api v0.15.0
 )
