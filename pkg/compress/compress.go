@@ -70,16 +70,16 @@ func (m Compress) ServeHandler(h http.Handler) http.Handler {
 			addHeaderIfNotExists(hh, "Vary", "Accept-Encoding")
 		}
 
-		gw := &compressWriter{
+		cw := &compressWriter{
 			ResponseWriter: w,
 			pool:           pool,
 			encoding:       m.Encoding,
 			types:          mapTypes,
 			minLength:      m.MinLength,
 		}
-		defer gw.Close()
+		defer cw.Close()
 
-		h.ServeHTTP(gw, r)
+		h.ServeHTTP(cw, r)
 	})
 }
 
