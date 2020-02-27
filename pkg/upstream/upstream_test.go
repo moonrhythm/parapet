@@ -3,8 +3,10 @@ package upstream_test
 import (
 	"bytes"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -243,4 +245,25 @@ func TestSingleHostUpstream(t *testing.T) {
 	assert.True(t, called)
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Equal(t, "ok", w.Body.String())
+}
+
+// https://github.com/moonrhythm/parapet/issues/115
+func TestIssue115(t *testing.T) {
+	t.Parallel()
+
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "127.0.0.1", r.Header.Get("X-Forwarded-For"))
+		w.Write([]byte("ok"))
+	}))
+	defer upstreamServer.Close()
+
+	frontendServer := httptest.NewServer(Upstream{
+		Transport: SingleHost(strings.TrimPrefix(upstreamServer.URL, "http://"), &HTTPTransport{}),
+	}.ServeHandler(http.NotFoundHandler()))
+	defer frontendServer.Close()
+
+	resp, _ := http.Get(frontendServer.URL)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	body, _ := ioutil.ReadAll(resp.Body)
+	assert.Equal(t, "ok", string(body))
 }
