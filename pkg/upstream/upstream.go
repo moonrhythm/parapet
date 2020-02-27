@@ -72,8 +72,6 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			if m.Host != "" {
 				req.Host = m.Host
 			}
-
-			req.RemoteAddr = "" // disable httputil.ReverseProxy to add X-Forwarded-For since we already added
 		},
 		BufferPool: bytesPool,
 		Transport:  &m,
@@ -110,7 +108,10 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 		},
 	}
 
-	return p
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.RemoteAddr = "" // disable httputil.ReverseProxy to add X-Forwarded-For since we already added
+		p.ServeHTTP(w, r)
+	})
 }
 
 // RoundTrip wraps transport round-trip

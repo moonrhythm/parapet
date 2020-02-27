@@ -257,12 +257,18 @@ func TestIssue115(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	frontendServer := httptest.NewServer(Upstream{
+	frontendServer := parapet.Server{
+		Addr: "127.0.0.1:3002",
+	}
+	frontendServer.Use(&Upstream{
 		Transport: SingleHost(strings.TrimPrefix(upstreamServer.URL, "http://"), &HTTPTransport{}),
-	}.ServeHandler(http.NotFoundHandler()))
-	defer frontendServer.Close()
+	})
+	go frontendServer.ListenAndServe()
+	defer frontendServer.Shutdown()
 
-	resp, _ := http.Get(frontendServer.URL)
+	time.Sleep(time.Second)
+
+	resp, _ := http.Get("http://127.0.0.1:3002")
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	body, _ := ioutil.ReadAll(resp.Body)
 	assert.Equal(t, "ok", string(body))
