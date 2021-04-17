@@ -24,7 +24,7 @@ type Compress struct {
 // default values
 const (
 	defaultCompressVary      = true
-	defaultCompressTypes     = "application/xml+rss application/atom+xml application/javascript application/x-javascript application/json application/rss+xml application/vnd.ms-fontobject application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/svg+xml image/x-icon text/css text/html text/plain text/x-component"
+	defaultCompressTypes     = "application/xml+rss application/atom+xml application/javascript application/x-javascript application/json application/rss+xml application/vnd.ms-fontobject application/x-font-ttf application/x-web-app-manifest+json application/xhtml+xml application/xml font/opentype image/svg+xml image/x-icon text/css text/html text/javascript text/plain text/x-component"
 	defaultCompressMinLength = 860
 )
 
