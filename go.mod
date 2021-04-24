@@ -19,9 +19,8 @@ require (
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
 	go.opencensus.io v0.23.0
 	golang.org/x/mod v0.4.2 // indirect
-	golang.org/x/net v0.0.0-20210410081132-afb366fc7cd1
+	golang.org/x/net v0.0.0-20210423184538-5f58ad60dda6
 	golang.org/x/oauth2 v0.0.0-20210413134643-5e61552d6c78 // indirect
-	golang.org/x/sys v0.0.0-20210414055047-fe65e336abe0 // indirect
 	google.golang.org/api v0.44.0
 	google.golang.org/genproto v0.0.0-20210413151531-c14fb6ef47c3 // indirect
 	google.golang.org/grpc v1.37.0 // indirect

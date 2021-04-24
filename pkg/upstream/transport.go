@@ -25,23 +25,53 @@ const (
 // H2CTransport type
 type H2CTransport struct {
 	once sync.Once
-	h    *http2.Transport
+	h2   *http2.Transport
+	h1   *http.Transport
+
+	HTTP2Transport *http2.Transport
+	HTTPTransport  *http.Transport
 }
 
 // RoundTrip implement http.RoundTripper
 func (t *H2CTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
-		t.h = &http2.Transport{
-			AllowHTTP:          true,
-			DisableCompression: true,
-			DialTLS: func(network, addr string, _ *tls.Config) (net.Conn, error) {
-				return net.Dial(network, addr)
-			},
+		t.h2 = t.HTTP2Transport
+		if t.h2 == nil {
+			t.h2 = &http2.Transport{
+				DisableCompression: true,
+			}
+		}
+		t.h2.AllowHTTP = true
+		t.h2.DialTLS = func(network, addr string, _ *tls.Config) (net.Conn, error) {
+			return net.Dial(network, addr)
+		}
+
+		t.h1 = t.HTTPTransport
+		if t.h1 == nil {
+			t.h1 = &http.Transport{
+				Proxy: http.ProxyFromEnvironment,
+				DialContext: (&net.Dialer{
+					Timeout:   defaultDialTimeout,
+					KeepAlive: defaultTCPKeepAlive,
+				}).DialContext,
+				DisableCompression:    true,
+				MaxIdleConns:          defaultMaxIdleConns,
+				MaxIdleConnsPerHost:   defaultMaxIdleConns,
+				IdleConnTimeout:       defaultIdleConnTimeout,
+				ResponseHeaderTimeout: defaultResponseHeaderTimeout,
+				ExpectContinueTimeout: defaultExpectContinueTimeout,
+			}
 		}
 	})
 
 	r.URL.Scheme = "http"
-	return t.h.RoundTrip(r)
+
+	// Currently Go does not support RFC 8441, downgrade to http1
+	if r.Header.Get("Upgrade") != "" {
+		return t.h1.RoundTrip(r)
+	}
+
+	return t.h2.RoundTrip(r)
 }
 
 // HTTPTransport type
