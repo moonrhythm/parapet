@@ -15,10 +15,8 @@ import (
 const (
 	defaultDialTimeout           = 5 * time.Second
 	defaultMaxIdleConns          = 32
-	defaultTCPKeepAlive          = time.Minute
 	defaultIdleConnTimeout       = 10 * time.Minute
 	defaultResponseHeaderTimeout = time.Minute
-	defaultExpectContinueTimeout = time.Second
 	defaultTLSHandshakeTimeout   = 5 * time.Second
 )
 
@@ -51,15 +49,13 @@ func (t *H2CTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			t.h1 = &http.Transport{
 				Proxy: http.ProxyFromEnvironment,
 				DialContext: (&net.Dialer{
-					Timeout:   defaultDialTimeout,
-					KeepAlive: defaultTCPKeepAlive,
+					Timeout: defaultDialTimeout,
 				}).DialContext,
 				DisableCompression:    true,
 				MaxIdleConns:          defaultMaxIdleConns,
 				MaxIdleConnsPerHost:   defaultMaxIdleConns,
 				IdleConnTimeout:       defaultIdleConnTimeout,
 				ResponseHeaderTimeout: defaultResponseHeaderTimeout,
-				ExpectContinueTimeout: defaultExpectContinueTimeout,
 			}
 		}
 	})
@@ -85,6 +81,7 @@ type HTTPTransport struct {
 	MaxConn               int
 	MaxIdleConns          int
 	IdleConnTimeout       time.Duration
+	ExpectContinueTimeout time.Duration
 	ResponseHeaderTimeout time.Duration
 }
 
@@ -93,9 +90,6 @@ func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.DialTimeout == 0 {
 			t.DialTimeout = defaultDialTimeout
-		}
-		if t.TCPKeepAlive == 0 {
-			t.TCPKeepAlive = defaultTCPKeepAlive
 		}
 		if t.MaxIdleConns == 0 {
 			t.MaxIdleConns = defaultMaxIdleConns
@@ -117,7 +111,7 @@ func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			MaxConnsPerHost:       t.MaxConn,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
-			ExpectContinueTimeout: defaultExpectContinueTimeout,
+			ExpectContinueTimeout: t.ExpectContinueTimeout,
 			DisableCompression:    true,
 			ResponseHeaderTimeout: t.ResponseHeaderTimeout,
 		}
@@ -138,6 +132,7 @@ type HTTPSTransport struct {
 	MaxConn               int
 	MaxIdleConns          int
 	IdleConnTimeout       time.Duration
+	ExpectContinueTimeout time.Duration
 	ResponseHeaderTimeout time.Duration
 	TLSClientConfig       *tls.Config
 }
@@ -147,9 +142,6 @@ func (t *HTTPSTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
 		if t.DialTimeout == 0 {
 			t.DialTimeout = defaultDialTimeout
-		}
-		if t.TCPKeepAlive == 0 {
-			t.TCPKeepAlive = defaultTCPKeepAlive
 		}
 		if t.MaxIdleConns == 0 {
 			t.MaxIdleConns = defaultMaxIdleConns
@@ -178,7 +170,7 @@ func (t *HTTPSTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
 			TLSHandshakeTimeout:   defaultTLSHandshakeTimeout,
-			ExpectContinueTimeout: defaultExpectContinueTimeout,
+			ExpectContinueTimeout: t.ExpectContinueTimeout,
 			DisableCompression:    true,
 			ResponseHeaderTimeout: t.ResponseHeaderTimeout,
 		}
@@ -196,6 +188,7 @@ type UnixTransport struct {
 	DisableKeepAlives     bool
 	MaxIdleConns          int
 	IdleConnTimeout       time.Duration
+	ExpectContinueTimeout time.Duration
 	ResponseHeaderTimeout time.Duration
 }
 
@@ -220,7 +213,7 @@ func (t *UnixTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			DisableKeepAlives:     t.DisableKeepAlives,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
 			IdleConnTimeout:       t.IdleConnTimeout,
-			ExpectContinueTimeout: defaultExpectContinueTimeout,
+			ExpectContinueTimeout: t.ExpectContinueTimeout,
 			DisableCompression:    true,
 			ResponseHeaderTimeout: t.ResponseHeaderTimeout,
 		}
