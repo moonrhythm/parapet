@@ -32,6 +32,7 @@ type Server struct {
 	ReadHeaderTimeout  time.Duration
 	WriteTimeout       time.Duration
 	IdleTimeout        time.Duration
+	MaxHeaderBytes     int
 	TCPKeepAlivePeriod time.Duration
 	GraceTimeout       time.Duration
 	WaitBeforeShutdown time.Duration
@@ -72,6 +73,7 @@ func (s *Server) configServer() {
 	s.s.ReadHeaderTimeout = s.ReadHeaderTimeout
 	s.s.WriteTimeout = s.WriteTimeout
 	s.s.IdleTimeout = s.IdleTimeout
+	s.s.MaxHeaderBytes = s.MaxHeaderBytes
 	s.s.ErrorLog = s.ErrorLog
 	s.s.TLSConfig = s.TLSConfig
 }
