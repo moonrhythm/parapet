@@ -26,7 +26,7 @@ func (b *Block) Use(m parapet.Middleware) {
 }
 
 // ServeHandler implements middleware interface
-func (b Block) ServeHandler(h http.Handler) http.Handler {
+func (b *Block) ServeHandler(h http.Handler) http.Handler {
 	next := b.ms.ServeHandler(http.NotFoundHandler())
 
 	if b.Match == nil {

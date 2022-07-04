@@ -20,7 +20,7 @@ func TestServer(t *testing.T) {
 		called = true
 		w.WriteHeader(200)
 	})
-	srv.Addr = ":8081"
+	srv.Addr = "127.0.0.1:8081"
 	go srv.ListenAndServe()
 	time.Sleep(100 * time.Millisecond)
 
@@ -43,7 +43,7 @@ func TestServerTLS(t *testing.T) {
 		assert.Equal(t, "https", r.Header.Get("X-Forwarded-Proto"))
 		w.WriteHeader(200)
 	})
-	srv.Addr = ":8082"
+	srv.Addr = "127.0.0.1:8082"
 	cert, err := GenerateSelfSignCertificate(SelfSign{
 		CommonName: "localhost",
 		Hosts:      []string{"localhost"},
