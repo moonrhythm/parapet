@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,7 @@ func TestRequest(t *testing.T) {
 			}),
 		}
 		go srv.ListenAndServe()
+		time.Sleep(100 * time.Millisecond)
 	}
 	authURL, err := url.Parse("http://127.0.0.1:8300")
 	require.NoError(t, err)
