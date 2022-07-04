@@ -1,4 +1,4 @@
-// +build cbrotli
+//go:build cbrotli
 
 package compress
 
