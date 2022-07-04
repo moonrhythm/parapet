@@ -98,4 +98,17 @@ func TestRequest(t *testing.T) {
 		assert.True(t, called)
 		assert.Equal(t, "ok", w.Body.String())
 	})
+
+	t.Run("CanNotConnectToAuthServer", func(t *testing.T) {
+		authURL, err := url.Parse("http://127.0.0.1:9999")
+		require.NoError(t, err)
+		m := Request(authURL)
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Fail(t, "must not be called")
+		})).ServeHTTP(w, r)
+		assert.Equal(t, 503, w.Code)
+	})
 }
