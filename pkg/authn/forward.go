@@ -19,15 +19,17 @@ func Forward(url *url.URL) *ForwardAuthenticator {
 
 // ForwardAuthenticator middleware
 type ForwardAuthenticator struct {
-	URL    *url.URL
-	Client *http.Client
+	URL                 *url.URL
+	Client              *http.Client
+	AuthRequestHeaders  []string
+	AuthResponseHeaders []string
+}
+
+func (m ForwardAuthenticator) validStatusCode(statusCode int) bool {
+	return statusCode >= 200 && statusCode < 300
 }
 
 func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
-	validStatus := map[int]bool{
-		http.StatusOK:        true,
-		http.StatusNoContent: true,
-	}
 	client := m.Client
 	if client == nil {
 		client = http.DefaultClient
@@ -42,13 +44,27 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 				return errors.New("missing url")
 			}
 
-			req, err := http.NewRequestWithContext(r.Context(), r.Method, urlStr, nil)
+			req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, urlStr, nil)
 			if err != nil {
 				return err
 			}
-			req.Header = r.Header.Clone()
+			if len(m.AuthRequestHeaders) == 0 {
+				req.Header = r.Header.Clone()
+			} else {
+				for _, h := range m.AuthRequestHeaders {
+					req.Header.Del(h)
+					for _, v := range r.Header.Values(h) {
+						req.Header.Add(h, v)
+					}
+				}
+			}
 			req.Header.Del("Content-Length")
-			req.Header.Set("X-Original-URL", r.URL.String())
+			req.Header.Set("X-Forwarded-Method", r.Method)
+			req.Header.Set("X-Forwarded-Host", r.Host)
+			req.Header.Set("X-Forwarded-Uri", r.RequestURI)
+			req.Header.Set("X-Forwarded-Proto", r.Header.Get("X-Forwarded-Proto"))
+			req.Header.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
+
 			resp, err := client.Do(req)
 			if err != nil {
 				return &ForwardServerError{
@@ -57,14 +73,24 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 					OriginError:      err,
 				}
 			}
-			if !validStatus[resp.StatusCode] {
+
+			if !m.validStatusCode(resp.StatusCode) {
 				return &ForwardServerError{
 					StatusCode: resp.StatusCode,
 					Response:   resp,
 				}
 			}
+
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
+
+			for _, h := range m.AuthResponseHeaders {
+				r.Header.Del(h)
+				for _, v := range resp.Header.Values(h) {
+					r.Header.Add(h, v)
+				}
+			}
+
 			return nil
 		},
 		Forbidden: func(w http.ResponseWriter, r *http.Request, err error) {
