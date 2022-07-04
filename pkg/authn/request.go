@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+
+	"github.com/moonrhythm/parapet/pkg/internal/pool"
 )
 
 // Request creates new auth request middleware
@@ -55,25 +57,43 @@ func (m RequestAuthenticator) ServeHandler(h http.Handler) http.Handler {
 					OriginError:      err,
 				}
 			}
-			defer resp.Body.Close()
-			defer io.Copy(io.Discard, resp.Body)
-
 			if !validStatus[resp.StatusCode] {
-				return &RequestAuthServerError{StatusCode: resp.StatusCode}
+				return &RequestAuthServerError{
+					StatusCode: resp.StatusCode,
+					Response:   resp,
+				}
 			}
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
 			return nil
 		},
 		Forbidden: func(w http.ResponseWriter, r *http.Request, err error) {
 			var authErr *RequestAuthServerError
-			if errors.As(err, &authErr) {
-				if authErr.IsTransportError {
-					http.Error(w, "Auth Server Unavailable", authErr.StatusCode)
-					return
-				}
-				http.Error(w, "", authErr.StatusCode)
+			if !errors.As(err, &authErr) {
+				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
 			}
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+
+			// can not connect to auth server
+			if authErr.IsTransportError {
+				http.Error(w, "Auth Server Unavailable", authErr.StatusCode)
+				return
+			}
+
+			// auth server not allow request
+			resp := authErr.Response
+			defer resp.Body.Close()
+			defer io.Copy(io.Discard, resp.Body)
+
+			wh := w.Header()
+			for k, v := range resp.Header {
+				wh[k] = v
+			}
+			w.WriteHeader(resp.StatusCode)
+
+			buf := pool.Get()
+			defer pool.Put(buf)
+			io.CopyBuffer(w, resp.Body, buf)
 		},
 	}.ServeHandler(h)
 }
@@ -82,6 +102,7 @@ type RequestAuthServerError struct {
 	StatusCode       int
 	IsTransportError bool
 	OriginError      error
+	Response         *http.Response
 }
 
 func (err *RequestAuthServerError) Error() string {
