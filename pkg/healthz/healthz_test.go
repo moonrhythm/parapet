@@ -16,7 +16,7 @@ func TestHealthz(t *testing.T) {
 
 	m := New()
 	s := parapet.Server{
-		Addr:               ":10100",
+		Addr:               "127.0.0.1:10100",
 		WaitBeforeShutdown: 200 * time.Millisecond,
 		Handler:            http.NotFoundHandler(),
 	}
