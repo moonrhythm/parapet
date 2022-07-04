@@ -47,7 +47,7 @@ func (m RequestAuthenticator) ServeHandler(h http.Handler) http.Handler {
 				return err
 			}
 			req.Header = r.Header.Clone()
-			req.Header.Set("Content-Length", "0")
+			req.Header.Del("Content-Length")
 			req.Header.Set("X-Original-URL", r.URL.String())
 			resp, err := client.Do(req)
 			if err != nil {
