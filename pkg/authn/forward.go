@@ -50,6 +50,7 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 			}
 			if len(m.AuthRequestHeaders) == 0 {
 				req.Header = r.Header.Clone()
+				req.Header.Del("Content-Length")
 			} else {
 				for _, h := range m.AuthRequestHeaders {
 					req.Header.Del(h)
@@ -58,7 +59,7 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 					}
 				}
 			}
-			req.Header.Del("Content-Length")
+
 			req.Header.Set("X-Forwarded-Method", r.Method)
 			req.Header.Set("X-Forwarded-Host", r.Host)
 			req.Header.Set("X-Forwarded-Uri", r.RequestURI)
