@@ -10,20 +10,20 @@ import (
 	"github.com/moonrhythm/parapet/pkg/internal/pool"
 )
 
-// Request creates new auth request middleware
-func Request(url *url.URL) *RequestAuthenticator {
-	return &RequestAuthenticator{
+// Forward creates new auth request middleware
+func Forward(url *url.URL) *ForwardAuthenticator {
+	return &ForwardAuthenticator{
 		URL: url,
 	}
 }
 
-// RequestAuthenticator middleware
-type RequestAuthenticator struct {
+// ForwardAuthenticator middleware
+type ForwardAuthenticator struct {
 	URL    *url.URL
 	Client *http.Client
 }
 
-func (m RequestAuthenticator) ServeHandler(h http.Handler) http.Handler {
+func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 	validStatus := map[int]bool{
 		http.StatusOK:        true,
 		http.StatusNoContent: true,
@@ -51,14 +51,14 @@ func (m RequestAuthenticator) ServeHandler(h http.Handler) http.Handler {
 			req.Header.Set("X-Original-URL", r.URL.String())
 			resp, err := client.Do(req)
 			if err != nil {
-				return &RequestAuthServerError{
+				return &ForwardServerError{
 					StatusCode:       http.StatusServiceUnavailable,
 					IsTransportError: true,
 					OriginError:      err,
 				}
 			}
 			if !validStatus[resp.StatusCode] {
-				return &RequestAuthServerError{
+				return &ForwardServerError{
 					StatusCode: resp.StatusCode,
 					Response:   resp,
 				}
@@ -68,7 +68,7 @@ func (m RequestAuthenticator) ServeHandler(h http.Handler) http.Handler {
 			return nil
 		},
 		Forbidden: func(w http.ResponseWriter, r *http.Request, err error) {
-			var authErr *RequestAuthServerError
+			var authErr *ForwardServerError
 			if !errors.As(err, &authErr) {
 				http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 				return
@@ -98,13 +98,13 @@ func (m RequestAuthenticator) ServeHandler(h http.Handler) http.Handler {
 	}.ServeHandler(h)
 }
 
-type RequestAuthServerError struct {
+type ForwardServerError struct {
 	StatusCode       int
 	IsTransportError bool
 	OriginError      error
 	Response         *http.Response
 }
 
-func (err *RequestAuthServerError) Error() string {
+func (err *ForwardServerError) Error() string {
 	return fmt.Sprintf("request auth server error; status=%d; error=%v", err.StatusCode, err.OriginError)
 }

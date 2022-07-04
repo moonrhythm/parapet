@@ -14,7 +14,7 @@ import (
 	. "github.com/moonrhythm/parapet/pkg/authn"
 )
 
-func TestRequest(t *testing.T) {
+func TestForward(t *testing.T) {
 	t.Parallel()
 
 	// start auth server
@@ -39,7 +39,7 @@ func TestRequest(t *testing.T) {
 	require.NoError(t, err)
 
 	t.Run("Unauthenticated", func(t *testing.T) {
-		m := Request(authURL)
+		m := Forward(authURL)
 
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("X-Return-Status", "401")
@@ -53,7 +53,7 @@ func TestRequest(t *testing.T) {
 	})
 
 	t.Run("Forbidden", func(t *testing.T) {
-		m := Request(authURL)
+		m := Forward(authURL)
 
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("X-Return-Status", "403")
@@ -67,7 +67,7 @@ func TestRequest(t *testing.T) {
 	})
 
 	t.Run("Authorized_200", func(t *testing.T) {
-		m := Request(authURL)
+		m := Forward(authURL)
 
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("X-Return-Status", "200")
@@ -84,7 +84,7 @@ func TestRequest(t *testing.T) {
 	})
 
 	t.Run("Authorized_204", func(t *testing.T) {
-		m := Request(authURL)
+		m := Forward(authURL)
 
 		r := httptest.NewRequest("GET", "/", nil)
 		r.Header.Set("X-Return-Status", "204")
@@ -102,7 +102,7 @@ func TestRequest(t *testing.T) {
 	t.Run("CanNotConnectToAuthServer", func(t *testing.T) {
 		authURL, err := url.Parse("http://127.0.0.1:9999")
 		require.NoError(t, err)
-		m := Request(authURL)
+		m := Forward(authURL)
 
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()
