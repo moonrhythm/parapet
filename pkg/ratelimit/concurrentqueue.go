@@ -25,8 +25,9 @@ type ConcurrentQueueStrategy struct {
 }
 
 type concurrentQueueItem struct {
-	Ch    chan struct{}
-	Count int // requests in queue
+	Process      chan struct{}
+	ProcessCount int
+	QueueCount   int
 }
 
 // Take returns true if current requests less than capacity
@@ -39,27 +40,25 @@ func (b *ConcurrentQueueStrategy) Take(key string) bool {
 	}
 
 	if b.storage[key] == nil {
-		b.storage[key] = new(concurrentQueueItem)
+		b.storage[key] = &concurrentQueueItem{
+			Process: make(chan struct{}, b.Capacity),
+		}
 	}
 
 	t := b.storage[key]
-	if t.Ch == nil {
-		t.Ch = make(chan struct{}, b.Capacity)
-	}
 
-	if t.Count >= b.Size {
+	if t.QueueCount >= b.Size {
 		// queue full, drop the request
 		return false
 	}
-
-	t.Count++
+	t.ProcessCount++
+	t.QueueCount++
 	b.mu.Unlock()
 
-	t.Ch <- struct{}{}
+	t.Process <- struct{}{}
 
 	b.mu.Lock()
-	t.Count--
-
+	t.QueueCount--
 	return true
 }
 
@@ -72,14 +71,15 @@ func (b *ConcurrentQueueStrategy) Put(key string) {
 		return
 	}
 
-	if b.storage[key] == nil {
+	t := b.storage[key]
+	if t == nil {
 		return
 	}
 
-	<-b.storage[key].Ch
+	<-t.Process
+	t.ProcessCount--
 
-	if b.storage[key].Count <= 0 {
-		close(b.storage[key].Ch)
+	if t.ProcessCount <= 0 && t.QueueCount <= 0 {
 		delete(b.storage, key)
 	}
 }
