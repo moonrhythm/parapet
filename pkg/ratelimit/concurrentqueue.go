@@ -25,8 +25,9 @@ type ConcurrentQueueStrategy struct {
 }
 
 type concurrentQueueItem struct {
-	Process    chan struct{}
-	QueueCount int
+	Process      chan struct{}
+	ProcessCount int
+	QueueCount   int
 }
 
 // Take returns true if current requests less than capacity
@@ -50,6 +51,7 @@ func (b *ConcurrentQueueStrategy) Take(key string) bool {
 		// queue full, drop the request
 		return false
 	}
+	t.ProcessCount++
 	t.QueueCount++
 	b.mu.Unlock()
 
@@ -75,8 +77,9 @@ func (b *ConcurrentQueueStrategy) Put(key string) {
 	}
 
 	<-t.Process
+	t.ProcessCount--
 
-	if t.QueueCount <= 0 {
+	if t.ProcessCount <= 0 && t.QueueCount <= 0 {
 		delete(b.storage, key)
 	}
 }
