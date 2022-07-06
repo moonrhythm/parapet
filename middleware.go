@@ -42,3 +42,22 @@ func (ms Middlewares) ServeHandler(h http.Handler) http.Handler {
 
 // Conditional returns condition for given request
 type Conditional func(r *http.Request) bool
+
+type Cond struct {
+	If   func(r *http.Request) bool
+	Then Middleware
+	Else Middleware
+}
+
+// ServeHandler implements middleware interface
+func (m Cond) ServeHandler(h http.Handler) http.Handler {
+	thenh := m.Then.ServeHandler(h)
+	elseh := m.Else.ServeHandler(h)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if m.If(r) {
+			thenh.ServeHTTP(w, r)
+		} else {
+			elseh.ServeHTTP(w, r)
+		}
+	})
+}
