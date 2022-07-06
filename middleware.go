@@ -52,7 +52,10 @@ type Cond struct {
 // ServeHandler implements middleware interface
 func (m Cond) ServeHandler(h http.Handler) http.Handler {
 	thenh := m.Then.ServeHandler(h)
-	elseh := m.Else.ServeHandler(h)
+	elseh := h
+	if m.Else != nil {
+		elseh = m.Else.ServeHandler(h)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.If(r) {
 			thenh.ServeHTTP(w, r)
