@@ -10,16 +10,16 @@ import (
 	. "github.com/moonrhythm/parapet/pkg/host"
 )
 
-func TestStripPort(t *testing.T) {
+func TestToLower(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
 		Host   string
 		Result string
 	}{
-		{"host:8080", "host"},
-		{"host.local:443", "host.local"},
-		{"example.com", "example.com"},
+		{"host", "host"},
+		{"HOST.local:443", "host.local:443"},
+		{"EXAMPLE.COM", "example.com"},
 	}
 
 	for _, tC := range cases {
@@ -28,7 +28,7 @@ func TestStripPort(t *testing.T) {
 			r.Host = tC.Host
 			w := httptest.NewRecorder()
 			called := false
-			StripPort().ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ToLower().ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				assert.Equal(t, tC.Result, r.Host)
 				called = true
 			})).ServeHTTP(w, r)
