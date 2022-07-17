@@ -22,6 +22,7 @@ type RateLimiter struct {
 	ExceededHandler      ExceededHandler
 	Strategy             Strategy
 	ReleaseOnWriteHeader bool // release token when write response's header
+	ReleaseOnHijacked    bool // release token when hijacked
 }
 
 // Strategy interface
@@ -69,37 +70,36 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 		m.ExceededHandler = defaultExceededHandler
 	}
 
-	if m.ReleaseOnWriteHeader {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key := m.Key(r)
-			if !m.Strategy.Take(key) {
-				m.ExceededHandler(w, r, m.Strategy.After(key))
-				return
-			}
-			release := func() {
-				m.Strategy.Put(key)
-			}
-			nw := responseWriter{
-				ResponseWriter: w,
-				OnWriteHeader:  release,
-			}
-			defer func() {
-				if nw.wroteHeader {
-					return
-				}
-				release()
-			}()
+	modifyRW := m.ReleaseOnWriteHeader || m.ReleaseOnHijacked
 
-			h.ServeHTTP(&nw, r)
-		})
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := m.Key(r)
 		if !m.Strategy.Take(key) {
 			m.ExceededHandler(w, r, m.Strategy.After(key))
 			return
 		}
-		defer m.Strategy.Put(key) // use defer to always put token back when panic
+		released := false
+		release := func() {
+			if released {
+				return
+			}
+			released = true
+			m.Strategy.Put(key)
+		}
+		defer release() // use defer to always put token back when panic
+
+		if modifyRW {
+			nw := responseWriter{
+				ResponseWriter: w,
+			}
+			if m.ReleaseOnWriteHeader {
+				nw.OnWriteHeader = release
+			}
+			if m.ReleaseOnHijacked {
+				nw.OnHijack = release
+			}
+			w = &nw
+		}
 
 		h.ServeHTTP(w, r)
 	})
@@ -108,7 +108,9 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 type responseWriter struct {
 	http.ResponseWriter
 	OnWriteHeader func()
-	wroteHeader   bool
+	OnHijack      func()
+
+	wroteHeader bool
 }
 
 func (w *responseWriter) WriteHeader(statusCode int) {
@@ -116,8 +118,10 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 		return
 	}
 	w.wroteHeader = true
+	if w.OnWriteHeader != nil {
+		w.OnWriteHeader()
+	}
 	w.ResponseWriter.WriteHeader(statusCode)
-	w.OnWriteHeader()
 }
 
 func (w *responseWriter) Write(p []byte) (int, error) {
@@ -144,8 +148,11 @@ func (w *responseWriter) Flush() {
 
 // Hijack implements Hijacker interface
 func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if w, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return w.Hijack()
+	if nw, ok := w.ResponseWriter.(http.Hijacker); ok {
+		if w.OnHijack != nil {
+			w.OnHijack()
+		}
+		return nw.Hijack()
 	}
 	return nil, nil, http.ErrNotSupported
 }
