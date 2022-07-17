@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"bufio"
 	"net"
 	"net/http"
 	"strconv"
@@ -17,9 +18,10 @@ func New(strategy Strategy) *RateLimiter {
 
 // RateLimiter middleware
 type RateLimiter struct {
-	Key             func(r *http.Request) string
-	ExceededHandler ExceededHandler
-	Strategy        Strategy
+	Key                  func(r *http.Request) string
+	ExceededHandler      ExceededHandler
+	Strategy             Strategy
+	ReleaseOnWriteHeader bool // release token when write response's header
 }
 
 // Strategy interface
@@ -67,6 +69,30 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 		m.ExceededHandler = defaultExceededHandler
 	}
 
+	if m.ReleaseOnWriteHeader {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := m.Key(r)
+			if !m.Strategy.Take(key) {
+				m.ExceededHandler(w, r, m.Strategy.After(key))
+				return
+			}
+			release := func() {
+				m.Strategy.Put(key)
+			}
+			nw := responseWriter{
+				ResponseWriter: w,
+				OnWriteHeader:  release,
+			}
+			defer func() {
+				if nw.wroteHeader {
+					return
+				}
+				release()
+			}()
+
+			h.ServeHTTP(&nw, r)
+		})
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := m.Key(r)
 		if !m.Strategy.Take(key) {
@@ -77,4 +103,49 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 
 		h.ServeHTTP(w, r)
 	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	OnWriteHeader func()
+	wroteHeader   bool
+}
+
+func (w *responseWriter) WriteHeader(statusCode int) {
+	if w.wroteHeader {
+		return
+	}
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(statusCode)
+	w.OnWriteHeader()
+}
+
+func (w *responseWriter) Write(p []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(p)
+}
+
+// Push implements Pusher interface
+func (w *responseWriter) Push(target string, opts *http.PushOptions) error {
+	if w, ok := w.ResponseWriter.(http.Pusher); ok {
+		return w.Push(target, opts)
+	}
+	return http.ErrNotSupported
+}
+
+// Flush implements Flusher interface
+func (w *responseWriter) Flush() {
+	if w, ok := w.ResponseWriter.(http.Flusher); ok {
+		w.Flush()
+	}
+}
+
+// Hijack implements Hijacker interface
+func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if w, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return w.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }

@@ -143,6 +143,93 @@ func TestRateLimiter(t *testing.T) {
 		m := New(nil)
 		assert.NotNil(t, m.Key)
 	})
+
+	t.Run("Release on write header", func(t *testing.T) {
+		put := false
+		strategy := &mockStrategy{
+			takeFunc: func(key string) bool {
+				return true
+			},
+			putFunc: func(key string) {
+				put = true
+			},
+			afterFunc: func(key string) time.Duration {
+				return 2 * time.Second
+			},
+		}
+
+		m := RateLimiter{
+			Strategy:             strategy,
+			ReleaseOnWriteHeader: true,
+		}
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		called := false
+		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.False(t, put)
+			w.WriteHeader(http.StatusOK)
+			assert.True(t, put)
+			called = true
+		})).ServeHTTP(w, r)
+		assert.True(t, called)
+	})
+
+	t.Run("Release on write header without call write header", func(t *testing.T) {
+		put := false
+		strategy := &mockStrategy{
+			takeFunc: func(key string) bool {
+				return true
+			},
+			putFunc: func(key string) {
+				put = true
+			},
+			afterFunc: func(key string) time.Duration {
+				return 2 * time.Second
+			},
+		}
+
+		m := RateLimiter{
+			Strategy:             strategy,
+			ReleaseOnWriteHeader: true,
+		}
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		called := false
+		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.False(t, put)
+			called = true
+		})).ServeHTTP(w, r)
+		assert.True(t, called)
+		assert.True(t, put)
+	})
+
+	t.Run("Release on write header exceed", func(t *testing.T) {
+		strategy := &mockStrategy{
+			takeFunc: func(key string) bool {
+				return false
+			},
+			putFunc: func(key string) {
+				assert.Fail(t, "must not be called")
+			},
+			afterFunc: func(key string) time.Duration {
+				return 2 * time.Second
+			},
+		}
+
+		m := RateLimiter{
+			Strategy:             strategy,
+			ReleaseOnWriteHeader: true,
+		}
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Fail(t, "must not be called")
+		})).ServeHTTP(w, r)
+		assert.Equal(t, http.StatusTooManyRequests, w.Code)
+	})
 }
 
 type mockStrategy struct {
