@@ -175,6 +175,36 @@ func TestRateLimiter(t *testing.T) {
 		assert.True(t, called)
 	})
 
+	t.Run("Release on write header without call write header", func(t *testing.T) {
+		put := false
+		strategy := &mockStrategy{
+			takeFunc: func(key string) bool {
+				return true
+			},
+			putFunc: func(key string) {
+				put = true
+			},
+			afterFunc: func(key string) time.Duration {
+				return 2 * time.Second
+			},
+		}
+
+		m := RateLimiter{
+			Strategy:             strategy,
+			ReleaseOnWriteHeader: true,
+		}
+
+		r := httptest.NewRequest("GET", "/", nil)
+		w := httptest.NewRecorder()
+		called := false
+		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.False(t, put)
+			called = true
+		})).ServeHTTP(w, r)
+		assert.True(t, called)
+		assert.True(t, put)
+	})
+
 	t.Run("Release on write header exceed", func(t *testing.T) {
 		strategy := &mockStrategy{
 			takeFunc: func(key string) bool {
