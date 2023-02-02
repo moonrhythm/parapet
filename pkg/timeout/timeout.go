@@ -1,9 +1,7 @@
 package timeout
 
 import (
-	"bufio"
 	"context"
-	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -117,25 +115,6 @@ func (w *timeoutRW) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-// Push implements Pusher interface
-func (w *timeoutRW) Push(target string, opts *http.PushOptions) error {
-	if w, ok := w.ResponseWriter.(http.Pusher); ok {
-		return w.Push(target, opts)
-	}
-	return http.ErrNotSupported
-}
-
-// Flush implements Flusher interface
-func (w *timeoutRW) Flush() {
-	if w, ok := w.ResponseWriter.(http.Flusher); ok {
-		w.Flush()
-	}
-}
-
-// Hijack implements Hijacker interface
-func (w *timeoutRW) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if w, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return w.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
+func (w *timeoutRW) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
