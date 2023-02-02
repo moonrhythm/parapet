@@ -65,9 +65,6 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			} else {
 				req.URL.RawQuery = targetPath.RawQuery + "&" + req.URL.RawQuery
 			}
-			if _, ok := req.Header["User-Agent"]; !ok {
-				req.Header.Set("User-Agent", "")
-			}
 
 			if m.Host != "" {
 				req.Host = m.Host
