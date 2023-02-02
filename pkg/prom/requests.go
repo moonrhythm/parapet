@@ -1,8 +1,6 @@
 package prom
 
 import (
-	"bufio"
-	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -81,25 +79,6 @@ func (w *requestTrackRW) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-// Push implements Pusher interface
-func (w *requestTrackRW) Push(target string, opts *http.PushOptions) error {
-	if w, ok := w.ResponseWriter.(http.Pusher); ok {
-		return w.Push(target, opts)
-	}
-	return http.ErrNotSupported
-}
-
-// Flush implements Flusher interface
-func (w *requestTrackRW) Flush() {
-	if w, ok := w.ResponseWriter.(http.Flusher); ok {
-		w.Flush()
-	}
-}
-
-// Hijack implements Hijacker interface
-func (w *requestTrackRW) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if w, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return w.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
+func (w *requestTrackRW) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }

@@ -1,8 +1,6 @@
 package h2push
 
 import (
-	"bufio"
-	"net"
 	"net/http"
 
 	"github.com/tomnomnom/linkheader"
@@ -75,25 +73,6 @@ func (w *preloadPusherRW) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
-// Push implements Pusher interface
-func (w *preloadPusherRW) Push(target string, opts *http.PushOptions) error {
-	if w, ok := w.ResponseWriter.(http.Pusher); ok {
-		return w.Push(target, opts)
-	}
-	return http.ErrNotSupported
-}
-
-// Flush implements Flusher interface
-func (w *preloadPusherRW) Flush() {
-	if w, ok := w.ResponseWriter.(http.Flusher); ok {
-		w.Flush()
-	}
-}
-
-// Hijack implements Hijacker interface
-func (w *preloadPusherRW) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if w, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return w.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
+func (w *preloadPusherRW) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }

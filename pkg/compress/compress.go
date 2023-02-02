@@ -1,10 +1,8 @@
 package compress
 
 import (
-	"bufio"
 	"io"
 	"mime"
-	"net"
 	"net/http"
 	"net/textproto"
 	"strconv"
@@ -163,30 +161,8 @@ func (w *compressWriter) WriteHeader(code int) {
 	w.ResponseWriter.WriteHeader(code)
 }
 
-// Push implements Pusher interface
-func (w *compressWriter) Push(target string, opts *http.PushOptions) error {
-	if w, ok := w.ResponseWriter.(http.Pusher); ok {
-		return w.Push(target, opts)
-	}
-	return http.ErrNotSupported
-}
-
-// Flush implements Flusher interface
-func (w *compressWriter) Flush() {
-	if w.encoder != nil {
-		w.encoder.Flush()
-	}
-	if w, ok := w.ResponseWriter.(http.Flusher); ok {
-		w.Flush()
-	}
-}
-
-// Hijack implements Hijacker interface
-func (w *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	if w, ok := w.ResponseWriter.(http.Hijacker); ok {
-		return w.Hijack()
-	}
-	return nil, nil, http.ErrNotSupported
+func (w *compressWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func addHeaderIfNotExists(h http.Header, key, value string) {
