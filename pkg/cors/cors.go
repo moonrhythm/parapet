@@ -17,10 +17,22 @@ func New() *CORS {
 	}
 }
 
+type AllowOriginFunc func(origin string) bool
+
+func AllowOrigins(origins ...string) AllowOriginFunc {
+	allow := make(map[string]bool)
+	for _, v := range origins {
+		allow[v] = true
+	}
+	return func(origin string) bool {
+		return allow[origin]
+	}
+}
+
 // CORS middleware
 type CORS struct {
 	AllowAllOrigins  bool
-	AllowOrigins     []string
+	AllowOrigins     AllowOriginFunc
 	AllowMethods     []string
 	AllowHeaders     []string
 	AllowCredentials bool
@@ -30,9 +42,12 @@ type CORS struct {
 
 // ServeHandler implements middleware interface
 func (m CORS) ServeHandler(h http.Handler) http.Handler {
+	if !m.AllowAllOrigins && m.AllowOrigins == nil {
+		panic("cors: AllowOrigins must be set if AllowAllOrigins is false")
+	}
+
 	preflightHeaders := make(http.Header)
 	headers := make(http.Header)
-	allowOrigins := make(map[string]bool)
 
 	if m.AllowCredentials {
 		preflightHeaders.Set("Access-Control-Allow-Credentials", "true")
@@ -58,17 +73,13 @@ func (m CORS) ServeHandler(h http.Handler) http.Handler {
 		preflightHeaders.Add("Vary", "Access-Control-Request-Method")
 		preflightHeaders.Add("Vary", "Access-Control-Request-Headers")
 		headers.Set("Vary", "Origin")
-
-		for _, v := range m.AllowOrigins {
-			allowOrigins[v] = true
-		}
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if origin := r.Header.Get("Origin"); len(origin) > 0 {
 			h := w.Header()
 			if !m.AllowAllOrigins {
-				if allowOrigins[origin] {
+				if m.AllowOrigins(origin) {
 					h.Set("Access-Control-Allow-Origin", origin)
 				} else {
 					w.WriteHeader(http.StatusForbidden)
