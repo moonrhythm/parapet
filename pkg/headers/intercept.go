@@ -1,6 +1,8 @@
 package headers
 
 import (
+	"bufio"
+	"net"
 	"net/http"
 )
 
@@ -107,4 +109,27 @@ func (w *interceptRW) StatusCode() int {
 
 func (w *interceptRW) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+// Push implements Pusher interface
+func (w *interceptRW) Push(target string, opts *http.PushOptions) error {
+	if w, ok := w.ResponseWriter.(http.Pusher); ok {
+		return w.Push(target, opts)
+	}
+	return http.ErrNotSupported
+}
+
+// Flush implements Flusher interface
+func (w *interceptRW) Flush() {
+	if w, ok := w.ResponseWriter.(http.Flusher); ok {
+		w.Flush()
+	}
+}
+
+// Hijack implements Hijacker interface
+func (w *interceptRW) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if w, ok := w.ResponseWriter.(http.Hijacker); ok {
+		return w.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }
