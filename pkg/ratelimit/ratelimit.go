@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"bufio"
 	"net"
 	"net/http"
 	"strconv"
@@ -132,4 +133,30 @@ func (w *responseWriter) Write(p []byte) (int, error) {
 
 func (w *responseWriter) Unwrap() http.ResponseWriter {
 	return w.ResponseWriter
+}
+
+// Push implements Pusher interface
+func (w *responseWriter) Push(target string, opts *http.PushOptions) error {
+	if w, ok := w.ResponseWriter.(http.Pusher); ok {
+		return w.Push(target, opts)
+	}
+	return http.ErrNotSupported
+}
+
+// Flush implements Flusher interface
+func (w *responseWriter) Flush() {
+	if w, ok := w.ResponseWriter.(http.Flusher); ok {
+		w.Flush()
+	}
+}
+
+// Hijack implements Hijacker interface
+func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if nw, ok := w.ResponseWriter.(http.Hijacker); ok {
+		if w.OnHijack != nil {
+			w.OnHijack()
+		}
+		return nw.Hijack()
+	}
+	return nil, nil, http.ErrNotSupported
 }
