@@ -1,6 +1,6 @@
 # parapet
 
-[![Build Status](https://travis-ci.org/moonrhythm/parapet.svg?branch=master)](https://travis-ci.org/moonrhythm/parapet)
+![Build Status](https://github.com/moonrhythm/parapet/actions/workflows/test.yaml/badge.svg?branch=master)
 [![codecov](https://codecov.io/gh/moonrhythm/parapet/branch/master/graph/badge.svg)](https://codecov.io/gh/moonrhythm/parapet)
 [![Go Report Card](https://goreportcard.com/badge/github.com/moonrhythm/parapet)](https://goreportcard.com/report/github.com/moonrhythm/parapet)
 [![GoDoc](https://godoc.org/github.com/moonrhythm/parapet?status.svg)](https://godoc.org/github.com/moonrhythm/parapet)
