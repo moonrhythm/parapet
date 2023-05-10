@@ -13,6 +13,8 @@ import (
 )
 
 // Compress is the compress middleware
+//
+//nolint:govet
 type Compress struct {
 	New       func() Compressor
 	Encoding  string // http Accept-Encoding, Content-Encoding value
@@ -93,12 +95,13 @@ type Compressor interface {
 
 type compressWriter struct {
 	http.ResponseWriter
+
 	pool        *sync.Pool
+	types       map[string]struct{}
 	encoder     Compressor
 	encoding    string
-	types       map[string]struct{}
-	wroteHeader bool
 	minLength   int
+	wroteHeader bool
 }
 
 func (w *compressWriter) init() {

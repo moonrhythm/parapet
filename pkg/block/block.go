@@ -15,9 +15,8 @@ func New(match func(r *http.Request) bool) *Block {
 
 // Block is middleware block
 type Block struct {
-	ms parapet.Middlewares
-
 	Match func(r *http.Request) bool
+	ms    parapet.Middlewares
 }
 
 // Use uses middleware

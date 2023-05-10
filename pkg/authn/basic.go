@@ -27,6 +27,8 @@ func Basic(username, password string) *BasicAuthenticator {
 }
 
 // BasicAuthenticator middleware
+//
+//nolint:govet
 type BasicAuthenticator struct {
 	Realm        string
 	Authenticate func(r *http.Request, username, password string) error

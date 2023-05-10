@@ -43,6 +43,7 @@ const (
 	headerXRealIP         = "X-Real-Ip"
 )
 
+//nolint:govet
 type proxy struct {
 	Trust                   func(r *http.Request) bool
 	ComputeFullForwardedFor bool

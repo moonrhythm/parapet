@@ -94,10 +94,11 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 
 type responseWriter struct {
 	http.ResponseWriter
-	wroteHeader   bool
+
 	wroteHeaderAt time.Time
-	statusCode    int
 	length        int64
+	statusCode    int
+	wroteHeader   bool
 }
 
 func (w *responseWriter) WriteHeader(statusCode int) {

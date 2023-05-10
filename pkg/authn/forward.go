@@ -126,10 +126,10 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 }
 
 type ForwardServerError struct {
+	Response         *http.Response
+	OriginError      error
 	StatusCode       int
 	IsTransportError bool
-	OriginError      error
-	Response         *http.Response
 }
 
 func (err *ForwardServerError) Error() string {

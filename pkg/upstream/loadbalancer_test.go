@@ -77,8 +77,8 @@ func TestRoundRobinLoadBalancer(t *testing.T) {
 }
 
 type fakeTransport struct {
-	called bool
 	host   string
+	called bool
 }
 
 func (tr *fakeTransport) RoundTrip(r *http.Request) (*http.Response, error) {

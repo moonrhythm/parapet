@@ -12,6 +12,7 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
+//nolint:govet
 type requests struct {
 	once sync.Once
 	vec  *prometheus.CounterVec

@@ -5,6 +5,8 @@ import (
 )
 
 // Authenticator middleware
+//
+//nolint:govet
 type Authenticator struct {
 	Type         string
 	Authenticate func(*http.Request) error

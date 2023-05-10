@@ -162,8 +162,8 @@ func SingleHost(host string, transport http.RoundTripper) *Upstream {
 }
 
 type singleHostTransport struct {
-	Host      string
 	Transport http.RoundTripper
+	Host      string
 }
 
 func (l *singleHostTransport) RoundTrip(r *http.Request) (*http.Response, error) {

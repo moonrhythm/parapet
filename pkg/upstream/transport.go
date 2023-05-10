@@ -21,6 +21,8 @@ const (
 )
 
 // H2CTransport type
+//
+//nolint:govet
 type H2CTransport struct {
 	once   sync.Once
 	dialer *net.Dialer
@@ -75,6 +77,8 @@ func (t *H2CTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // HTTPTransport type
+//
+//nolint:govet
 type HTTPTransport struct {
 	once sync.Once
 	h    *http.Transport
@@ -126,6 +130,8 @@ func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // HTTPSTransport type
+//
+//nolint:govet
 type HTTPSTransport struct {
 	once sync.Once
 	h    *http.Transport
@@ -185,6 +191,8 @@ func (t *HTTPSTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // UnixTransport type
+//
+//nolint:govet
 type UnixTransport struct {
 	once sync.Once
 	h    *http.Transport
@@ -229,6 +237,8 @@ func (t *UnixTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 // Transport does RoundTrip dynamically from request's scheme
+//
+//nolint:govet
 type Transport struct {
 	once   sync.Once
 	dialer *net.Dialer

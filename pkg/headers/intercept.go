@@ -68,10 +68,11 @@ func (m ResponseInterceptor) ServeHandler(h http.Handler) http.Handler {
 
 type interceptRW struct {
 	http.ResponseWriter
+
+	f           ResponseInterceptFunc
+	status      int
 	wroteHeader bool
 	intercepted bool
-	status      int
-	f           ResponseInterceptFunc
 }
 
 func (w *interceptRW) intercept() {

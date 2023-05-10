@@ -24,6 +24,8 @@ func New(client *storage.Client, bucket string, basePath string) *GCS {
 }
 
 // GCS proxies request to google cloud storage
+//
+//nolint:govet
 type GCS struct {
 	Client       *storage.Client
 	Bucket       string

@@ -29,6 +29,8 @@ func FixedWindowPerHour(rate int) *RateLimiter {
 }
 
 // FixedWindowStrategy implements Strategy using fixed window algorithm
+//
+//nolint:govet
 type FixedWindowStrategy struct {
 	mu         sync.RWMutex
 	lastWindow int64

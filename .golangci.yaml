@@ -1,3 +1,12 @@
 linters:
   disable:
   - errcheck
+linters-settings:
+  govet:
+    enable:
+    - fieldalignment
+issues:
+  exclude-rules:
+  - path: _test\.go
+    linters:
+    - govet

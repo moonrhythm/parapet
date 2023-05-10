@@ -12,6 +12,8 @@ import (
 )
 
 // SelfSign options
+//
+//nolint:govet
 type SelfSign struct {
 	CommonName string
 	Hosts      []string

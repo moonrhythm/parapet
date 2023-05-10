@@ -12,6 +12,8 @@ func LimitRequest(size int64) *RequestLimiter {
 }
 
 // RequestLimiter limits request body size
+//
+//nolint:govet
 type RequestLimiter struct {
 	Size           int64
 	LimitedHandler http.Handler

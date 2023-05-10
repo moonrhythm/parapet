@@ -57,10 +57,11 @@ func (fs *fileSystem) Open(name string) (http.File, error) {
 
 type responseWriter struct {
 	http.ResponseWriter
-	wroteHeader bool
+
 	header      http.Header
-	noop        bool
 	notFound    func()
+	wroteHeader bool
+	noop        bool
 }
 
 func (w *responseWriter) Header() http.Header {

@@ -9,6 +9,7 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
+//nolint:govet
 type networks struct {
 	once      sync.Once
 	requests  prometheus.Counter

@@ -9,9 +9,11 @@ import (
 )
 
 // RequestID middleware
+//
+//nolint:govet
 type RequestID struct {
 	// TrustProxy trusts request id from request header
-	// sets to false to always generate new request id
+	// sets TrustProxy to false for always generate new request id
 	TrustProxy bool
 
 	// Header is the http header key

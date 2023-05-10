@@ -7,8 +7,8 @@ import (
 
 // Target is the load balancer target
 type Target struct {
-	Host      string
 	Transport http.RoundTripper
+	Host      string
 }
 
 // NewRoundRobinLoadBalancer creates new round-robin load balancer
@@ -20,9 +20,8 @@ func NewRoundRobinLoadBalancer(targets []*Target) *RoundRobinLoadBalancer {
 
 // RoundRobinLoadBalancer strategy
 type RoundRobinLoadBalancer struct {
-	i uint32
-
 	Targets []*Target
+	i       uint32
 }
 
 // RoundTrip sends a request to upstream server

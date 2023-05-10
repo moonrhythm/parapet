@@ -9,9 +9,9 @@ import (
 type ctxKeyRecord struct{}
 
 type record struct {
+	data    map[string]interface{}
 	mu      sync.RWMutex
 	disable bool
-	data    map[string]interface{}
 }
 
 func newRecord() *record {

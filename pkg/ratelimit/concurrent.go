@@ -15,6 +15,8 @@ func Concurrent(capacity int) *RateLimiter {
 // ConcurrentStrategy implements Strategy
 // that allow only max concurrent requests at a time
 // other requests will drop
+//
+//nolint:govet
 type ConcurrentStrategy struct {
 	mu      sync.Mutex
 	storage map[string]int

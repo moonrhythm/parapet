@@ -16,6 +16,8 @@ func ConcurrentQueue(capacity, size int) *RateLimiter {
 // ConcurrentQueueStrategy implements Strategy
 // that allow only max concurrent requests at a time
 // other requests will queue, until queue full then the request wil drop
+//
+//nolint:govet
 type ConcurrentQueueStrategy struct {
 	mu      sync.Mutex
 	storage map[string]*concurrentQueueItem

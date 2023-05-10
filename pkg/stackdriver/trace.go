@@ -19,6 +19,8 @@ func NewTrace() *Trace {
 }
 
 // Trace middleware
+//
+//nolint:govet
 type Trace struct {
 	ProjectID               string
 	Propagation             propagation.HTTPFormat

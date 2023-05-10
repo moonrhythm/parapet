@@ -31,13 +31,13 @@ func AllowOrigins(origins ...string) AllowOriginFunc {
 
 // CORS middleware
 type CORS struct {
-	AllowAllOrigins  bool
 	AllowOrigins     AllowOriginFunc
 	AllowMethods     []string
 	AllowHeaders     []string
-	AllowCredentials bool
 	ExposeHeaders    []string
 	MaxAge           time.Duration
+	AllowAllOrigins  bool
+	AllowCredentials bool
 }
 
 // ServeHandler implements middleware interface

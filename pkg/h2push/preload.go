@@ -37,8 +37,8 @@ func (m PreloadPusher) ServeHandler(h http.Handler) http.Handler {
 type preloadPusherRW struct {
 	http.ResponseWriter
 
-	wroteHeader bool
 	header      http.Header
+	wroteHeader bool
 }
 
 func (w *preloadPusherRW) Header() http.Header {

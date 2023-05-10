@@ -14,6 +14,8 @@ func LeakyBucket(perRequest time.Duration, size int) *RateLimiter {
 }
 
 // LeakyBucketStrategy implements Strategy using leaky bucket algorithm
+//
+//nolint:govet
 type LeakyBucketStrategy struct {
 	mu      sync.RWMutex
 	storage map[string]*leakyItem

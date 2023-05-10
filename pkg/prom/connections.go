@@ -10,6 +10,7 @@ import (
 	"github.com/moonrhythm/parapet"
 )
 
+//nolint:govet
 type connections struct {
 	once    sync.Once
 	vec     *prometheus.GaugeVec

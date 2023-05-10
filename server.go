@@ -18,6 +18,8 @@ import (
 )
 
 // Server is the parapet server
+//
+//nolint:govet
 type Server struct {
 	s          http.Server
 	once       sync.Once

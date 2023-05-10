@@ -16,8 +16,8 @@ func New(timeout time.Duration) *Timout {
 
 // Timout sets a write header timeout
 type Timout struct {
-	Timeout        time.Duration
 	TimeoutHandler http.Handler
+	Timeout        time.Duration
 }
 
 // ServeHandler implements middleware interface
@@ -69,10 +69,10 @@ func (m Timout) ServeHandler(h http.Handler) http.Handler {
 type timeoutRW struct {
 	http.ResponseWriter
 
-	mu          sync.Mutex
-	done        chan struct{}
-	wroteHeader bool
 	header      http.Header
+	done        chan struct{}
+	mu          sync.Mutex
+	wroteHeader bool
 	timeout     bool
 }
 
