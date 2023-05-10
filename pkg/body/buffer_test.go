@@ -3,7 +3,6 @@ package body_test
 import (
 	"context"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -39,7 +38,7 @@ func TestRequestBufferer(t *testing.T) {
 			if !done {
 				assert.Fail(t, "can not done")
 			}
-			p, _ := ioutil.ReadAll(r.Body)
+			p, _ := io.ReadAll(r.Body)
 			assert.Equal(t, []byte("test"), p)
 			assert.EqualValues(t, 4, r.ContentLength)
 			assert.Len(t, p, 4)
@@ -69,7 +68,7 @@ func TestRequestBufferer(t *testing.T) {
 			if !done {
 				assert.Fail(t, "can not done")
 			}
-			p, _ := ioutil.ReadAll(r.Body)
+			p, _ := io.ReadAll(r.Body)
 			assert.Equal(t, []byte("test"), p)
 			assert.EqualValues(t, 4, r.ContentLength)
 			assert.Len(t, p, 4)

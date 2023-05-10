@@ -3,7 +3,7 @@ package upstream_test
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -270,6 +270,6 @@ func TestIssue115(t *testing.T) {
 
 	resp, _ := http.Get("http://127.0.0.1:3002")
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body, _ := ioutil.ReadAll(resp.Body)
+	body, _ := io.ReadAll(resp.Body)
 	assert.Equal(t, "ok", string(body))
 }

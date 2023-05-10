@@ -2,7 +2,7 @@ package body_test
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -66,7 +66,7 @@ func TestRequestLimiter(t *testing.T) {
 		w := httptest.NewRecorder()
 
 		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ioutil.ReadAll(r.Body)
+			io.ReadAll(r.Body)
 		})).ServeHTTP(w, r)
 		assert.Equal(t, http.StatusRequestEntityTooLarge, w.Code)
 	})
