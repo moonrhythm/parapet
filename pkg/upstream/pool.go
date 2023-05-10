@@ -9,9 +9,9 @@ var bytesPool = &_bytesPool{}
 type _bytesPool struct{}
 
 func (p _bytesPool) Get() []byte {
-	return pool.Get()
+	return *pool.Get()
 }
 
 func (p _bytesPool) Put(b []byte) {
-	pool.Put(b)
+	pool.Put(&b)
 }

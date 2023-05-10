@@ -120,7 +120,7 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 
 			buf := pool.Get()
 			defer pool.Put(buf)
-			io.CopyBuffer(w, resp.Body, buf)
+			io.CopyBuffer(w, resp.Body, *buf)
 		},
 	}.ServeHandler(h)
 }

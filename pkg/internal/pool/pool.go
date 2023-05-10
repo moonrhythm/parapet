@@ -5,12 +5,12 @@ import (
 )
 
 // Get gets bytes from pool
-func Get() []byte {
-	return bytesPool.Get().([]byte)
+func Get() *[]byte {
+	return bytesPool.Get().(*[]byte)
 }
 
 // Put puts bytes back to pool
-func Put(b []byte) {
+func Put(b *[]byte) {
 	bytesPool.Put(b)
 }
 
@@ -22,7 +22,8 @@ func Size() int64 {
 const bufferSize = 16 * 1024 // 16 KiB
 
 var bytesPool = sync.Pool{
-	New: func() interface{} {
-		return make([]byte, bufferSize)
+	New: func() any {
+		b := make([]byte, bufferSize)
+		return &b
 	},
 }

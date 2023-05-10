@@ -21,7 +21,6 @@ import (
 type Server struct {
 	s          http.Server
 	once       sync.Once
-	trackState sync.Once
 	ms         Middlewares
 	onShutdown []func()
 	modifyConn []func(conn net.Conn) net.Conn
