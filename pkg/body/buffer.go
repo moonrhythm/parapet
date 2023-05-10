@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -35,7 +34,7 @@ func (m RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 			b := pool.Get()
 			defer pool.Put(b)
 
-			n, err := io.ReadAtLeast(r.Body, b, int(r.ContentLength))
+			n, err := io.ReadAtLeast(r.Body, *b, int(r.ContentLength))
 			if err == io.EOF {
 				err = nil
 			}
@@ -45,7 +44,7 @@ func (m RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 			}
 
 			r.Body.Close()
-			r.Body = ioutil.NopCloser(bytes.NewReader(b[:n]))
+			r.Body = io.NopCloser(bytes.NewReader((*b)[:n]))
 
 			if r.Context().Err() == context.Canceled {
 				return
@@ -56,7 +55,7 @@ func (m RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 		}
 
 		// case 3: body larger than buffer size or unknown size, then buffer to file
-		fp, err := ioutil.TempFile("", "request-*")
+		fp, err := os.CreateTemp("", "request-*")
 		if err != nil {
 			log.Println("can not create temp file;", err)
 
@@ -70,7 +69,7 @@ func (m RequestBufferer) ServeHandler(h http.Handler) http.Handler {
 		}()
 
 		b := pool.Get()
-		_, err = io.CopyBuffer(fp, r.Body, b)
+		_, err = io.CopyBuffer(fp, r.Body, *b)
 		pool.Put(b)
 		if err == io.EOF {
 			err = nil

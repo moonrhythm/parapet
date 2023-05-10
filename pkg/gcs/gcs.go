@@ -97,7 +97,7 @@ func (m GCS) ServeHandler(h http.Handler) http.Handler {
 
 		b := pool.Get()
 		defer pool.Put(b)
-		io.CopyBuffer(w, reader, b)
+		io.CopyBuffer(w, reader, *b)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
