@@ -1,4 +1,4 @@
-default: vet staticcheck test
+default: vet lint test
 
 test:
 	go test -race ./...
@@ -6,5 +6,5 @@ test:
 vet:
 	go vet ./...
 
-staticcheck:
-	staticcheck ./...
+lint:
+	golangci-lint run
