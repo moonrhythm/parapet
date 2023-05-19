@@ -14,6 +14,7 @@ import (
 type connections struct {
 	once    sync.Once
 	vec     *prometheus.GaugeVec
+	gauge   map[http.ConnState]prometheus.Gauge
 	storage sync.Map
 }
 
@@ -25,24 +26,27 @@ func (p *connections) init() {
 			Namespace: Namespace,
 			Name:      "connections",
 		}, []string{"state"})
+		p.gauge = map[http.ConnState]prometheus.Gauge{
+			http.StateNew:    p.vec.WithLabelValues(http.StateNew.String()),
+			http.StateActive: p.vec.WithLabelValues(http.StateActive.String()),
+			http.StateIdle:   p.vec.WithLabelValues(http.StateIdle.String()),
+		}
 		reg.MustRegister(p.vec)
 	})
 }
 
 func (p *connections) inc(state http.ConnState) {
-	c, err := p.vec.GetMetricWith(prometheus.Labels{"state": state.String()})
-	if err != nil {
+	if p.gauge == nil {
 		return
 	}
-	c.Inc()
+	p.gauge[state].Inc()
 }
 
 func (p *connections) dec(state http.ConnState) {
-	c, err := p.vec.GetMetricWith(prometheus.Labels{"state": state.String()})
-	if err != nil {
+	if p.gauge == nil {
 		return
 	}
-	c.Dec()
+	p.gauge[state].Dec()
 }
 
 func (p *connections) connState(conn net.Conn, state http.ConnState) {
