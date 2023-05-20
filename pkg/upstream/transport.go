@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/net/http2"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 const (
@@ -69,7 +71,7 @@ func (t *H2CTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	r.URL.Scheme = "http"
 
 	// Currently Go does not support RFC 8441, downgrade to http1
-	if r.Header.Get("Upgrade") != "" {
+	if header.Exists(r.Header, header.Upgrade) {
 		return t.h1.RoundTrip(r)
 	}
 
@@ -325,7 +327,7 @@ func (t *Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 		r.URL.Scheme = "http"
 
 		// Currently Go does not support RFC 8441, downgrade to http1
-		if r.Header.Get("Upgrade") != "" {
+		if header.Exists(r.Header, header.Upgrade) {
 			tr = t.httpTr
 		}
 	case "unix":

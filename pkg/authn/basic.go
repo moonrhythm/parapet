@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 var (
@@ -45,7 +47,7 @@ func (m BasicAuthenticator) ServeHandler(h http.Handler) http.Handler {
 		Type: t,
 		Authenticate: func(r *http.Request) error {
 			username, password, ok := r.BasicAuth()
-			r.Header.Del("Authorization")
+			header.Del(r.Header, header.Authorization)
 			if !ok {
 				return ErrMissingAuthorization
 			}

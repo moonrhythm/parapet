@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 	"github.com/moonrhythm/parapet/pkg/internal/pool"
 )
 
@@ -38,6 +39,12 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 	if m.URL != nil {
 		urlStr = m.URL.String()
 	}
+	for i, h := range m.AuthRequestHeaders {
+		m.AuthRequestHeaders[i] = http.CanonicalHeaderKey(h)
+	}
+	for i, h := range m.AuthResponseHeaders {
+		m.AuthResponseHeaders[i] = http.CanonicalHeaderKey(h)
+	}
 	return Authenticator{
 		Authenticate: func(r *http.Request) error {
 			if urlStr == "" {
@@ -50,21 +57,21 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 			}
 			if len(m.AuthRequestHeaders) == 0 {
 				req.Header = r.Header.Clone()
-				req.Header.Del("Content-Length")
+				header.Del(req.Header, header.ContentLength)
 			} else {
 				for _, h := range m.AuthRequestHeaders {
-					req.Header.Del(h)
+					header.Del(req.Header, h)
 					for _, v := range r.Header.Values(h) {
-						req.Header.Add(h, v)
+						header.Add(req.Header, h, v)
 					}
 				}
 			}
 
-			req.Header.Set("X-Forwarded-Method", r.Method)
-			req.Header.Set("X-Forwarded-Host", r.Host)
-			req.Header.Set("X-Forwarded-Uri", r.RequestURI)
-			req.Header.Set("X-Forwarded-Proto", r.Header.Get("X-Forwarded-Proto"))
-			req.Header.Set("X-Forwarded-For", r.Header.Get("X-Forwarded-For"))
+			header.Set(req.Header, header.XForwardedMethod, r.Method)
+			header.Set(req.Header, header.XForwardedHost, r.Host)
+			header.Set(req.Header, header.XForwardedURI, r.RequestURI)
+			header.Set(req.Header, header.XForwardedProto, header.Get(r.Header, header.XForwardedProto))
+			header.Set(req.Header, header.XForwardedFor, header.Get(r.Header, header.XForwardedFor))
 
 			resp, err := client.Do(req)
 			if err != nil {
@@ -86,9 +93,9 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 			resp.Body.Close()
 
 			for _, h := range m.AuthResponseHeaders {
-				r.Header.Del(h)
+				header.Del(r.Header, h)
 				for _, v := range resp.Header.Values(h) {
-					r.Header.Add(h, v)
+					header.Add(r.Header, h, v)
 				}
 			}
 

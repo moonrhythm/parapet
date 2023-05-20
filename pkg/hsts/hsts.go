@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // HSTS middleware
@@ -42,7 +44,7 @@ func (m HSTS) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Strict-Transport-Security", hs)
+		header.Set(w.Header(), header.StrictTransportSecurity, hs)
 		h.ServeHTTP(w, r)
 	})
 }

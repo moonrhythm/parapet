@@ -11,6 +11,8 @@ import (
 	"go.opencensus.io/trace"
 	"go.opencensus.io/trace/propagation"
 	"google.golang.org/api/option"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // NewTrace creates new stack driver trace middleware
@@ -40,7 +42,7 @@ func (m Trace) ServeHandler(h http.Handler) http.Handler {
 	}
 	if m.FormatSpanName == nil {
 		m.FormatSpanName = func(r *http.Request) string {
-			proto := r.Header.Get("X-Forwarded-Proto")
+			proto := header.Get(r.Header, header.XForwardedProto)
 			return proto + "://" + r.Host + r.RequestURI
 		}
 	}

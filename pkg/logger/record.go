@@ -15,7 +15,7 @@ type record struct {
 }
 
 func newRecord() *record {
-	return &record{data: make(map[string]interface{})}
+	return &record{data: make(map[string]interface{}, 18)}
 }
 
 func (r *record) Set(name string, value interface{}) {

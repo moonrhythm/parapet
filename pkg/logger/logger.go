@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // Logger middleware
@@ -41,9 +43,9 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		proto := r.Header.Get("X-Forwarded-Proto")
-		realIP := r.Header.Get("X-Real-Ip")
-		xff := r.Header.Get("X-Forwarded-For")
+		proto := header.Get(r.Header, header.XForwardedProto)
+		realIP := header.Get(r.Header, header.XRealIP)
+		xff := header.Get(r.Header, header.XForwardedFor)
 		remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 
 		d := newRecord()

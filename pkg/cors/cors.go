@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // New creates new default cors middleware for public api
@@ -50,37 +52,37 @@ func (m CORS) ServeHandler(h http.Handler) http.Handler {
 	headers := make(http.Header)
 
 	if m.AllowCredentials {
-		preflightHeaders.Set("Access-Control-Allow-Credentials", "true")
-		headers.Set("Access-Control-Allow-Credentials", "true")
+		header.Set(preflightHeaders, header.AccessControlAllowCredentials, "true")
+		header.Set(headers, header.AccessControlAllowCredentials, "true")
 	}
 	if len(m.AllowMethods) > 0 {
-		preflightHeaders.Set("Access-Control-Allow-Methods", strings.Join(m.AllowMethods, ","))
+		header.Set(preflightHeaders, header.AccessControlAllowMethods, strings.Join(m.AllowMethods, ","))
 	}
 	if len(m.AllowHeaders) > 0 {
-		preflightHeaders.Set("Access-Control-Allow-Headers", strings.Join(m.AllowHeaders, ","))
+		header.Set(preflightHeaders, header.AccessControlAllowHeaders, strings.Join(m.AllowHeaders, ","))
 	}
 	if len(m.ExposeHeaders) > 0 {
-		headers.Set("Access-Control-Expose-Headers", strings.Join(m.ExposeHeaders, ","))
+		header.Set(headers, header.AccessControlExposeHeaders, strings.Join(m.ExposeHeaders, ","))
 	}
 	if m.MaxAge > time.Duration(0) {
-		preflightHeaders.Set("Access-Control-Max-Age", strconv.FormatInt(int64(m.MaxAge/time.Second), 10))
+		header.Set(preflightHeaders, header.AccessControlMaxAge, strconv.FormatInt(int64(m.MaxAge/time.Second), 10))
 	}
 	if m.AllowAllOrigins {
-		preflightHeaders.Set("Access-Control-Allow-Origin", "*")
-		headers.Set("Access-Control-Allow-Origin", "*")
+		header.Set(preflightHeaders, header.AccessControlAllowOrigin, "*")
+		header.Set(headers, header.AccessControlAllowOrigin, "*")
 	} else {
-		preflightHeaders.Add("Vary", "Origin")
-		preflightHeaders.Add("Vary", "Access-Control-Request-Method")
-		preflightHeaders.Add("Vary", "Access-Control-Request-Headers")
-		headers.Set("Vary", "Origin")
+		header.Add(preflightHeaders, header.Vary, header.Origin)
+		header.Add(preflightHeaders, header.Vary, header.AccessControlRequestMethod)
+		header.Add(preflightHeaders, header.Vary, header.AccessControlRequestHeaders)
+		header.Set(headers, header.Vary, header.Origin)
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if origin := r.Header.Get("Origin"); len(origin) > 0 {
+		if origin := header.Get(r.Header, header.Origin); len(origin) > 0 {
 			h := w.Header()
 			if !m.AllowAllOrigins {
 				if m.AllowOrigins(origin) {
-					h.Set("Access-Control-Allow-Origin", origin)
+					header.Set(h, header.AccessControlAllowOrigin, origin)
 				} else {
 					w.WriteHeader(http.StatusForbidden)
 					return
