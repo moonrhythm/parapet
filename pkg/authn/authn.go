@@ -2,6 +2,8 @@ package authn
 
 import (
 	"net/http"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // Authenticator middleware
@@ -27,7 +29,7 @@ func (m Authenticator) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := m.Authenticate(r); err != nil {
 			if m.Type != "" {
-				w.Header().Set("WWW-Authenticate", m.Type)
+				header.Set(w.Header(), header.WWWAuthenticate, m.Type)
 			}
 			m.Forbidden(w, r, err)
 			return

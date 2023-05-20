@@ -3,6 +3,8 @@ package redirect
 import (
 	"net/http"
 	"strings"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // NonWWW creates new non www redirector
@@ -24,7 +26,7 @@ func (m NonWWWRedirector) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		host := strings.TrimPrefix(r.Host, "www.")
 		if len(host) < len(r.Host) {
-			proto := r.Header.Get("X-Forwarded-Proto")
+			proto := header.Get(r.Header, header.XForwardedProto)
 			http.Redirect(w, r, proto+"://"+host+r.RequestURI, m.StatusCode)
 			return
 		}

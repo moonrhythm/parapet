@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // New creates new rate limiter
@@ -42,7 +44,7 @@ type ExceededHandler func(w http.ResponseWriter, r *http.Request, after time.Dur
 
 func defaultExceededHandler(w http.ResponseWriter, _ *http.Request, after time.Duration) {
 	if after > 0 {
-		w.Header().Set("Retry-After", strconv.FormatInt(int64(after/time.Second), 10))
+		header.Set(w.Header(), header.RetryAfter, strconv.FormatInt(int64(after/time.Second), 10))
 	}
 	http.Error(w, "Too Many Requests", http.StatusTooManyRequests)
 }
@@ -53,7 +55,7 @@ func defaultKey(_ *http.Request) string {
 
 // ClientIP returns client ip from request
 func ClientIP(r *http.Request) string {
-	ipStr := r.Header.Get("X-Real-Ip")
+	ipStr := header.Get(r.Header, header.XRealIP)
 	ip := net.ParseIP(ipStr)
 	if ip == nil {
 		return ipStr

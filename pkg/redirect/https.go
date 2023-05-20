@@ -2,6 +2,8 @@ package redirect
 
 import (
 	"net/http"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // HTTPS creates new https redirector
@@ -21,7 +23,7 @@ func (m HTTPSRedirector) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		proto := r.Header.Get("X-Forwarded-Proto")
+		proto := header.Get(r.Header, header.XForwardedProto)
 		if proto == "http" {
 			http.Redirect(w, r, "https://"+r.Host+r.RequestURI, m.StatusCode)
 			return

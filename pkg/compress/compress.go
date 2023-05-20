@@ -6,10 +6,11 @@ import (
 	"mime"
 	"net"
 	"net/http"
-	"net/textproto"
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // Compress is the compress middleware
@@ -49,13 +50,13 @@ func (m Compress) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// skip if client not support
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), m.Encoding) {
+		if !strings.Contains(header.Get(r.Header, header.AcceptEncoding), m.Encoding) {
 			h.ServeHTTP(w, r)
 			return
 		}
 
 		// skip if web socket
-		if r.Header.Get("Sec-WebSocket-Key") != "" {
+		if header.Exists(r.Header, header.SecWebsocketKey) {
 			h.ServeHTTP(w, r)
 			return
 		}
@@ -63,13 +64,13 @@ func (m Compress) ServeHandler(h http.Handler) http.Handler {
 		hh := w.Header()
 
 		// skip if already encode
-		if hh.Get("Content-Encoding") != "" {
+		if header.Exists(hh, header.ContentEncoding) {
 			h.ServeHTTP(w, r)
 			return
 		}
 
 		if m.Vary {
-			addHeaderIfNotExists(hh, "Vary", "Accept-Encoding")
+			header.AddIfNotExists(hh, header.Vary, header.AcceptEncoding)
 		}
 
 		cw := &compressWriter{
@@ -108,13 +109,13 @@ func (w *compressWriter) init() {
 	h := w.Header()
 
 	// skip if already encode
-	if h.Get("Content-Encoding") != "" {
+	if header.Exists(h, header.ContentEncoding) {
 		return
 	}
 
 	// skip if length < min length
 	if w.minLength > 0 {
-		if sl := h.Get("Content-Length"); sl != "" {
+		if sl := header.Get(h, header.ContentLength); sl != "" {
 			l, _ := strconv.Atoi(sl)
 			if l > 0 && l < w.minLength {
 				return
@@ -124,7 +125,7 @@ func (w *compressWriter) init() {
 
 	// skip if no match type
 	if _, ok := w.types["*"]; !ok {
-		ct, _, err := mime.ParseMediaType(h.Get("Content-Type"))
+		ct, _, err := mime.ParseMediaType(header.Get(h, header.ContentType))
 		if err != nil {
 			ct = "application/octet-stream"
 		}
@@ -135,8 +136,8 @@ func (w *compressWriter) init() {
 
 	w.encoder = w.pool.Get().(Compressor)
 	w.encoder.Reset(w.ResponseWriter)
-	h.Del("Content-Length")
-	h.Set("Content-Encoding", w.encoding)
+	header.Del(h, header.ContentLength)
+	header.Set(h, header.ContentEncoding, w.encoding)
 }
 
 func (w *compressWriter) Write(b []byte) (int, error) {
@@ -194,14 +195,4 @@ func (w *compressWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 		return w.Hijack()
 	}
 	return nil, nil, http.ErrNotSupported
-}
-
-func addHeaderIfNotExists(h http.Header, key, value string) {
-	key = textproto.CanonicalMIMEHeaderKey(key)
-	for _, v := range h[key] {
-		if v == value {
-			return
-		}
-	}
-	h.Add(key, value)
 }

@@ -3,6 +3,8 @@ package redirect
 import (
 	"net/http"
 	"strings"
+
+	"github.com/moonrhythm/parapet/pkg/internal/header"
 )
 
 // WWW creates new www redirector
@@ -23,7 +25,7 @@ func (m WWWRedirector) ServeHandler(h http.Handler) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.Host, "www.") {
-			proto := r.Header.Get("X-Forwarded-Proto")
+			proto := header.Get(r.Header, header.XForwardedProto)
 			http.Redirect(w, r, proto+"://www."+r.Host+r.RequestURI, m.StatusCode)
 			return
 		}

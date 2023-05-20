@@ -2,12 +2,11 @@ package headers
 
 import (
 	"net/http"
-	"net/textproto"
 )
 
 // MapRequest creates new request interceptor for map a header
 func MapRequest(header string, mapper func(string) string) *RequestInterceptor {
-	header = textproto.CanonicalMIMEHeaderKey(header)
+	header = http.CanonicalHeaderKey(header)
 
 	return InterceptRequest(func(h http.Header) {
 		for i, v := range h[header] {
@@ -18,7 +17,7 @@ func MapRequest(header string, mapper func(string) string) *RequestInterceptor {
 
 // MapResponse creates new response interceptor for map a header
 func MapResponse(header string, mapper func(string) string) *ResponseInterceptor {
-	header = textproto.CanonicalMIMEHeaderKey(header)
+	header = http.CanonicalHeaderKey(header)
 
 	return InterceptResponse(func(w ResponseHeaderWriter) {
 		h := w.Header()
