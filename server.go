@@ -43,6 +43,7 @@ type Server struct {
 	ReusePort          bool
 	ConnState          func(conn net.Conn, state http.ConnState)
 	TLSConfig          *tls.Config
+	BaseContext        func(net.Listener) context.Context
 }
 
 type serverContextKey struct{}
@@ -86,12 +87,14 @@ func (s *Server) configHandler() {
 			Trust:   s.TrustProxy,
 			Handler: h,
 		}
-		h = func(h http.Handler) http.HandlerFunc {
-			return func(w http.ResponseWriter, r *http.Request) {
-				ctx := context.WithValue(r.Context(), ServerContextKey, s)
-				h.ServeHTTP(w, r.WithContext(ctx))
+		s.s.BaseContext = func(l net.Listener) context.Context {
+			ctx := context.Background()
+			if s.BaseContext != nil {
+				ctx = s.BaseContext(l)
 			}
-		}(h)
+			ctx = context.WithValue(ctx, ServerContextKey, s)
+			return ctx
+		}
 		if s.H2C {
 			h = h2c.NewHandler(h, &http2.Server{})
 		}
