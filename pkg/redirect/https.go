@@ -3,7 +3,7 @@ package redirect
 import (
 	"net/http"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // HTTPS creates new https redirector

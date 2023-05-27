@@ -11,7 +11,7 @@ import (
 
 	"golang.org/x/net/http2"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 const (

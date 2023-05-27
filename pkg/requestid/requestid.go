@@ -5,7 +5,7 @@ import (
 
 	"github.com/gofrs/uuid"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 	"github.com/moonrhythm/parapet/pkg/logger"
 )
 

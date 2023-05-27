@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // Logger middleware

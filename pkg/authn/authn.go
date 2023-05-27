@@ -3,7 +3,7 @@ package authn
 import (
 	"net/http"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // Authenticator middleware

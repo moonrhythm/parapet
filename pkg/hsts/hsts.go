@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // HSTS middleware

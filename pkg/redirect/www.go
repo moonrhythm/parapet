@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // WWW creates new www redirector

@@ -12,7 +12,7 @@ import (
 	"go.opencensus.io/trace/propagation"
 	"google.golang.org/api/option"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // NewTrace creates new stack driver trace middleware

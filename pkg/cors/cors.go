@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // New creates new default cors middleware for public api

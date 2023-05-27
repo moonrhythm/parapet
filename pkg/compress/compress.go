@@ -10,7 +10,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/moonrhythm/parapet/pkg/internal/header"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 // Compress is the compress middleware
