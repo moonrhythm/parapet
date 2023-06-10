@@ -2,11 +2,17 @@
 
 package compress
 
-import "net/http"
+import (
+	"net/http"
+)
 
 // Br creates noop middleware
 func Br() *Noop {
 	return new(Noop)
+}
+
+func BrWithQuality(quality int) *Noop {
+	return Br()
 }
 
 // Noop middleware
