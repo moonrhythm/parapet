@@ -10,9 +10,17 @@ import (
 
 // Br creates new brotli compress middleware
 func Br() *Compress {
+	return BrWithOption(cbrotli.WriterOptions{Quality: 4})
+}
+
+func BrWithQuality(quality int) *Compress {
+	return BrWithOption(cbrotli.WriterOptions{Quality: quality})
+}
+
+func BrWithOption(opt cbrotli.WriterOptions) *Compress {
 	return &Compress{
 		New: func() Compressor {
-			return &brWriter{quality: 4}
+			return &brWriter{opt: &opt}
 		},
 		Encoding:  "br",
 		Vary:      defaultCompressVary,
@@ -22,10 +30,11 @@ func Br() *Compress {
 }
 
 type brWriter struct {
-	quality int
 	*cbrotli.Writer
+
+	opt *cbrotli.WriterOptions
 }
 
 func (w *brWriter) Reset(p io.Writer) {
-	w.Writer = cbrotli.NewWriter(p, cbrotli.WriterOptions{Quality: w.quality})
+	w.Writer = cbrotli.NewWriter(p, *w.opt)
 }
