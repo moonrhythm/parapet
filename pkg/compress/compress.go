@@ -43,7 +43,7 @@ func (m Compress) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	pool := &sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return m.New()
 		},
 	}
