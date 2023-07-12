@@ -46,9 +46,6 @@ func (m Trace) ServeHandler(h http.Handler) http.Handler {
 			return proto + "://" + r.Host + r.RequestURI
 		}
 	}
-	if m.StartOptions.Sampler == nil {
-		m.StartOptions.Sampler = trace.AlwaysSample()
-	}
 	if m.StartOptions.SpanKind == trace.SpanKindUnspecified {
 		m.StartOptions.SpanKind = trace.SpanKindServer
 	}
