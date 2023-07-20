@@ -7,7 +7,9 @@ import (
 	"go.opencensus.io/trace"
 )
 
-func Register(opt stackdriver.Options) trace.Exporter {
+type Options = stackdriver.Options
+
+func Register(opt Options) trace.Exporter {
 	exporter, err := stackdriver.NewExporter(opt)
 	if err != nil {
 		log.Println("stackdriver: can not create exporter;", err)
