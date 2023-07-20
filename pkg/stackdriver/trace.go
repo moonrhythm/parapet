@@ -1,16 +1,12 @@
 package stackdriver
 
 import (
-	"log"
 	"net/http"
-	"time"
 
-	"contrib.go.opencensus.io/exporter/stackdriver"
 	sdpropagation "go.opencensus.io/exporter/stackdriver/propagation"
 	"go.opencensus.io/plugin/ochttp"
 	"go.opencensus.io/trace"
 	"go.opencensus.io/trace/propagation"
-	"google.golang.org/api/option"
 
 	"github.com/moonrhythm/parapet/pkg/header"
 )
@@ -24,15 +20,10 @@ func NewTrace() *Trace {
 //
 //nolint:govet
 type Trace struct {
-	ProjectID               string
-	Propagation             propagation.HTTPFormat
-	BundleCountThreshold    int
-	BundleDelayThreshold    time.Duration
-	IsPublicEndpoint        bool
-	FormatSpanName          func(r *http.Request) string
-	StartOptions            trace.StartOptions
-	MonitoringClientOptions []option.ClientOption
-	TraceClientOptions      []option.ClientOption
+	Propagation      propagation.HTTPFormat
+	IsPublicEndpoint bool
+	FormatSpanName   func(r *http.Request) string
+	StartOptions     trace.StartOptions
 }
 
 // ServeHandler implements middleware interface
@@ -49,20 +40,6 @@ func (m Trace) ServeHandler(h http.Handler) http.Handler {
 	if m.StartOptions.SpanKind == trace.SpanKindUnspecified {
 		m.StartOptions.SpanKind = trace.SpanKindServer
 	}
-
-	exporter, err := stackdriver.NewExporter(stackdriver.Options{
-		ProjectID:               m.ProjectID,
-		BundleCountThreshold:    m.BundleCountThreshold,
-		BundleDelayThreshold:    m.BundleDelayThreshold,
-		MonitoringClientOptions: m.MonitoringClientOptions,
-		TraceClientOptions:      m.TraceClientOptions,
-	})
-	if err != nil {
-		log.Println("stackdriver/trace:", err)
-		return h
-	}
-
-	trace.RegisterExporter(exporter)
 
 	return &ochttp.Handler{
 		Handler:          h,
