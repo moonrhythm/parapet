@@ -59,6 +59,10 @@ func (s *Server) Use(m Middleware) {
 	s.ms.Use(m)
 }
 
+func (s *Server) UseFunc(m MiddlewareFunc) {
+	s.Use(m)
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.configHandler()
 

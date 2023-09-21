@@ -32,6 +32,10 @@ func (ms *Middlewares) Use(m Middleware) {
 	*ms = append(*ms, m)
 }
 
+func (ms *Middlewares) UseFunc(m MiddlewareFunc) {
+	ms.Use(m)
+}
+
 // ServeHandler implements middleware interface
 func (ms Middlewares) ServeHandler(h http.Handler) http.Handler {
 	for i := len(ms); i > 0; i-- {
