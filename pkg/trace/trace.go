@@ -23,6 +23,7 @@ type Trace struct {
 	IsPublicEndpoint bool
 	FormatSpanName   func(r *http.Request) string
 	StartOptions     trace.StartOptions
+	GetStartOptions  func(r *http.Request) trace.StartOptions
 }
 
 // ServeHandler implements middleware interface
@@ -42,6 +43,7 @@ func (m Trace) ServeHandler(h http.Handler) http.Handler {
 		Propagation:      m.Propagation,
 		FormatSpanName:   m.FormatSpanName,
 		StartOptions:     m.StartOptions,
+		GetStartOptions:  m.GetStartOptions,
 		IsPublicEndpoint: m.IsPublicEndpoint,
 	}
 }
