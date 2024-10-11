@@ -3,6 +3,7 @@ package parapet
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -115,7 +116,7 @@ func (s *Server) ListenAndServe() error {
 	errChan := make(chan error)
 
 	go func() {
-		if err := s.listenAndServe(); err != http.ErrServerClosed {
+		if err := s.listenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			errChan <- err
 		}
 	}()
@@ -145,16 +146,21 @@ func (s *Server) listenAndServe() error {
 	var err error
 	if s.ReusePort {
 		ln, err = reuseport.NewReusablePortListener("tcp", addr)
+		if err != nil {
+			return err
+		}
+		ln = &tcpListener{
+			TCPListener:     ln.(*net.TCPListener),
+			KeepAlivePeriod: s.TCPKeepAlivePeriod,
+		}
 	} else {
-		ln, err = net.Listen("tcp", addr)
-	}
-	if err != nil {
-		return err
-	}
-
-	ln = &tcpListener{
-		TCPListener:     ln.(*net.TCPListener),
-		KeepAlivePeriod: s.TCPKeepAlivePeriod,
+		lc := net.ListenConfig{
+			KeepAlive: s.TCPKeepAlivePeriod,
+		}
+		ln, err = lc.Listen(context.Background(), "tcp", addr)
+		if err != nil {
+			return err
+		}
 	}
 
 	if len(s.modifyConn) > 0 {

@@ -11,7 +11,7 @@ jobs:
     timeout-minutes: 5
     strategy:
       matrix:
-        go: ['1.22']
+        go: ['1.23']
     steps:
     - uses: actions/checkout@v3
     - uses: actions/setup-go@v4
