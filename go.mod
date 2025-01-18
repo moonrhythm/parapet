@@ -1,18 +1,18 @@
 module github.com/moonrhythm/parapet
 
-go 1.23.2
+go 1.23.5
 
 require (
 	cloud.google.com/go/storage v1.44.0
 	contrib.go.opencensus.io/exporter/stackdriver v0.13.14
 	github.com/gofrs/uuid v4.4.0+incompatible
-	github.com/google/brotli/go/cbrotli v0.0.0-20240919160234-350100a5bb9d
+	github.com/google/brotli/go/cbrotli v0.0.0-20250117113955-28b118371570
 	github.com/kavu/go_reuseport v1.5.0
-	github.com/prometheus/client_golang v1.20.4
+	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.9.0
 	github.com/tomnomnom/linkheader v0.0.0-20180905144013-02ca5825eb80
 	go.opencensus.io v0.24.0
-	golang.org/x/net v0.30.0
+	golang.org/x/net v0.34.0
 	google.golang.org/api v0.200.0
 )
 
@@ -62,11 +62,11 @@ require (
 	go.opentelemetry.io/otel/sdk v1.29.0 // indirect
 	go.opentelemetry.io/otel/sdk/metric v1.29.0 // indirect
 	go.opentelemetry.io/otel/trace v1.29.0 // indirect
-	golang.org/x/crypto v0.28.0 // indirect
+	golang.org/x/crypto v0.32.0 // indirect
 	golang.org/x/oauth2 v0.23.0 // indirect
-	golang.org/x/sync v0.8.0 // indirect
-	golang.org/x/sys v0.26.0 // indirect
-	golang.org/x/text v0.19.0 // indirect
+	golang.org/x/sync v0.10.0 // indirect
+	golang.org/x/sys v0.29.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/time v0.7.0 // indirect
 	google.golang.org/genproto v0.0.0-20241007155032-5fefd90f89a9 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240930140551-af27646dc61f // indirect
