@@ -6,7 +6,7 @@ require (
 	cloud.google.com/go/storage v1.44.0
 	contrib.go.opencensus.io/exporter/stackdriver v0.13.14
 	github.com/gofrs/uuid v4.4.0+incompatible
-	github.com/google/brotli/go/cbrotli v0.0.0-20250117113955-28b118371570
+	github.com/google/brotli/go/cbrotli v0.0.0-20240919160234-350100a5bb9d
 	github.com/kavu/go_reuseport v1.5.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.9.0
