@@ -18,9 +18,7 @@ jobs:
       with:
         go-version: ${{ matrix.go }}
     - name: golangci-lint
-      uses: golangci/golangci-lint-action@v3
-      with:
-        args: --timeout=5m
+      uses: golangci/golangci-lint-action@v9
   test:
     runs-on: ubuntu-latest
     strategy:
