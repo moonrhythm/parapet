@@ -99,7 +99,7 @@ func (s *Server) configHandler() {
 			return ctx
 		}
 		if s.H2C {
-			p := &http.Protocols{}
+			p := new(http.Protocols)
 			p.SetHTTP1(true)
 			p.SetUnencryptedHTTP2(true)
 			s.s.Protocols = p

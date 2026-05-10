@@ -24,7 +24,7 @@ func TestH2CTransport(t *testing.T) {
 			w.WriteHeader(201)
 			w.Write([]byte("ok"))
 		}))
-		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols = new(http.Protocols)
 		ts.Config.Protocols.SetHTTP1(true)
 		ts.Config.Protocols.SetUnencryptedHTTP2(true)
 		ts.Start()
@@ -56,7 +56,7 @@ func TestH2CTransport(t *testing.T) {
 			rw.Flush()
 			conn.Close()
 		}))
-		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols = new(http.Protocols)
 		ts.Config.Protocols.SetHTTP1(true)
 		ts.Config.Protocols.SetUnencryptedHTTP2(true)
 		ts.Start()
@@ -204,7 +204,7 @@ func TestTransport(t *testing.T) {
 			w.WriteHeader(201)
 			w.Write([]byte("ok h2c"))
 		}))
-		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols = new(http.Protocols)
 		ts.Config.Protocols.SetHTTP1(true)
 		ts.Config.Protocols.SetUnencryptedHTTP2(true)
 		ts.Start()
@@ -234,7 +234,7 @@ func TestTransport(t *testing.T) {
 			rw.Flush()
 			conn.Close()
 		}))
-		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols = new(http.Protocols)
 		ts.Config.Protocols.SetHTTP1(true)
 		ts.Config.Protocols.SetUnencryptedHTTP2(true)
 		ts.Start()
