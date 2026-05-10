@@ -14,8 +14,6 @@ import (
 	"time"
 
 	"github.com/kavu/go_reuseport"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 // Server is the parapet server
@@ -101,7 +99,10 @@ func (s *Server) configHandler() {
 			return ctx
 		}
 		if s.H2C {
-			h = h2c.NewHandler(h, &http2.Server{})
+			p := &http.Protocols{}
+			p.SetHTTP1(true)
+			p.SetUnencryptedHTTP2(true)
+			s.s.Protocols = p
 		}
 		s.s.Handler = h
 	})

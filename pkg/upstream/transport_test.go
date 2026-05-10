@@ -11,24 +11,23 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 )
 
 func TestH2CTransport(t *testing.T) {
 	t.Parallel()
 
 	t.Run("HTTP", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "PRI", r.Method)
-			h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Nil(t, r.TLS)
-				assert.Equal(t, "HTTP/2.0", r.Proto)
-				assert.Equal(t, "example.com", r.Host)
-				w.WriteHeader(201)
-				w.Write([]byte("ok"))
-			}), &http2.Server{}).ServeHTTP(w, r)
+		ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Nil(t, r.TLS)
+			assert.Equal(t, "HTTP/2.0", r.Proto)
+			assert.Equal(t, "example.com", r.Host)
+			w.WriteHeader(201)
+			w.Write([]byte("ok"))
 		}))
+		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols.SetHTTP1(true)
+		ts.Config.Protocols.SetUnencryptedHTTP2(true)
+		ts.Start()
 		defer ts.Close()
 
 		tr := H2CTransport{}
@@ -44,22 +43,23 @@ func TestH2CTransport(t *testing.T) {
 	})
 
 	t.Run("Upgrade", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.NotEqual(t, "PRI", r.Method)
-			h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "proto", r.Header.Get("Upgrade"))
-				assert.Equal(t, "HTTP/1.1", r.Proto)
+		ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "proto", r.Header.Get("Upgrade"))
+			assert.Equal(t, "HTTP/1.1", r.Proto)
 
-				conn, rw, err := w.(http.Hijacker).Hijack()
-				assert.NoError(t, err)
-				rw.WriteString("HTTP/1.1 200 OK\r\n")
-				rw.WriteString("Content-Length: 2\r\n")
-				rw.WriteString("\r\n")
-				rw.WriteString("ok")
-				rw.Flush()
-				conn.Close()
-			}), &http2.Server{}).ServeHTTP(w, r)
+			conn, rw, err := w.(http.Hijacker).Hijack()
+			assert.NoError(t, err)
+			rw.WriteString("HTTP/1.1 200 OK\r\n")
+			rw.WriteString("Content-Length: 2\r\n")
+			rw.WriteString("\r\n")
+			rw.WriteString("ok")
+			rw.Flush()
+			conn.Close()
 		}))
+		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols.SetHTTP1(true)
+		ts.Config.Protocols.SetUnencryptedHTTP2(true)
+		ts.Start()
 		defer ts.Close()
 
 		tr := H2CTransport{}
@@ -198,15 +198,16 @@ func TestTransport(t *testing.T) {
 	t.Run("H2C", func(t *testing.T) {
 		t.Parallel()
 
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.Equal(t, "PRI", r.Method)
-			h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Nil(t, r.TLS)
-				assert.Equal(t, "HTTP/2.0", r.Proto)
-				w.WriteHeader(201)
-				w.Write([]byte("ok h2c"))
-			}), &http2.Server{}).ServeHTTP(w, r)
+		ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Nil(t, r.TLS)
+			assert.Equal(t, "HTTP/2.0", r.Proto)
+			w.WriteHeader(201)
+			w.Write([]byte("ok h2c"))
 		}))
+		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols.SetHTTP1(true)
+		ts.Config.Protocols.SetUnencryptedHTTP2(true)
+		ts.Start()
 		defer ts.Close()
 
 		r := httptest.NewRequest("GET", "h2c://"+strings.TrimPrefix(ts.URL, "http://"), nil)
@@ -220,22 +221,23 @@ func TestTransport(t *testing.T) {
 	})
 
 	t.Run("H2C Upgrade", func(t *testing.T) {
-		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			assert.NotEqual(t, "PRI", r.Method)
-			h2c.NewHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				assert.Equal(t, "proto", r.Header.Get("Upgrade"))
-				assert.Equal(t, "HTTP/1.1", r.Proto)
+		ts := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "proto", r.Header.Get("Upgrade"))
+			assert.Equal(t, "HTTP/1.1", r.Proto)
 
-				conn, rw, err := w.(http.Hijacker).Hijack()
-				assert.NoError(t, err)
-				rw.WriteString("HTTP/1.1 200 OK\r\n")
-				rw.WriteString("Content-Length: 2\r\n")
-				rw.WriteString("\r\n")
-				rw.WriteString("ok")
-				rw.Flush()
-				conn.Close()
-			}), &http2.Server{}).ServeHTTP(w, r)
+			conn, rw, err := w.(http.Hijacker).Hijack()
+			assert.NoError(t, err)
+			rw.WriteString("HTTP/1.1 200 OK\r\n")
+			rw.WriteString("Content-Length: 2\r\n")
+			rw.WriteString("\r\n")
+			rw.WriteString("ok")
+			rw.Flush()
+			conn.Close()
 		}))
+		ts.Config.Protocols = &http.Protocols{}
+		ts.Config.Protocols.SetHTTP1(true)
+		ts.Config.Protocols.SetUnencryptedHTTP2(true)
+		ts.Start()
 		defer ts.Close()
 
 		r := httptest.NewRequest("GET", "h2c://"+strings.TrimPrefix(ts.URL, "http://"), nil)
