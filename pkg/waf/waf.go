@@ -32,13 +32,20 @@ func (f LoggerFunc) Logf(format string, args ...any) { f(format, args...) }
 //
 //nolint:govet
 type MatchEvent struct {
-	Request    *http.Request
-	RuleID     string
-	Action     Action
+	Request *http.Request
+	RuleID  string
+	Action  Action
+	// Status is the rule's configured Status field (defaulted to 403 when
+	// the rule didn't set one). It is the HTTP status that *would be*
+	// returned for an ActionBlock match; for ActionLog and ActionAllow it
+	// carries the configured value but does not describe the actual response.
 	Status     int
 	Expression string
 	ClientIP   string
-	Latency    time.Duration
+	// Elapsed is the time spent inside the WAF up to and including this
+	// match — i.e. evaluating every rule that ran before this one plus the
+	// matching rule itself. It is NOT the per-rule evaluation latency.
+	Elapsed time.Duration
 }
 
 // Default tunables.
@@ -231,18 +238,17 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 
 		var bodyStr string
 		if w.InspectBody > 0 && r.Body != nil {
-			// LimitReader prevents an attacker from exhausting memory with a
-			// huge body. The unread suffix is preserved by chaining the
-			// limited slice in front of the original body.
+			// LimitReader caps the read so a huge body cannot exhaust memory.
+			// We always restore r.Body (even on read error) so downstream sees
+			// the bytes we consumed — io.ReadAll returns whatever was read
+			// before the error, and dropping that prefix would silently
+			// corrupt the request for the next handler.
 			lim := io.LimitReader(r.Body, w.InspectBody)
-			buf, err := io.ReadAll(lim)
-			if err == nil {
-				bodyStr = string(buf)
-				// Restore the body so downstream handlers see the same bytes.
-				r.Body = bodyReplayCloser{
-					Reader: io.MultiReader(bytes.NewReader(buf), r.Body),
-					orig:   r.Body,
-				}
+			buf, _ := io.ReadAll(lim)
+			bodyStr = string(buf)
+			r.Body = bodyReplayCloser{
+				Reader: io.MultiReader(bytes.NewReader(buf), r.Body),
+				orig:   r.Body,
 			}
 		}
 
@@ -256,6 +262,13 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 		defer cancel()
 
 		start := time.Now()
+		var ipOnce string
+		ip := func() string {
+			if ipOnce == "" {
+				ipOnce = clientIP(r)
+			}
+			return ipOnce
+		}
 		for _, rule := range rs.rules {
 			matched, err := evalRule(ctx, rule, input)
 			if err != nil {
@@ -279,13 +292,13 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 					Action:     rule.action,
 					Status:     rule.status,
 					Expression: rule.expression,
-					ClientIP:   clientIP(r),
-					Latency:    time.Since(start),
+					ClientIP:   ip(),
+					Elapsed:    time.Since(start),
 				})
 			}
 			if w.Logger != nil {
 				w.Logger.Logf("waf: matched rule=%q action=%s status=%d ip=%s method=%s host=%s path=%s",
-					rule.id, rule.action, rule.status, clientIP(r), r.Method, r.Host, r.URL.Path)
+					rule.id, rule.action, rule.status, ip(), r.Method, r.Host, r.URL.Path)
 			}
 
 			switch rule.action {
