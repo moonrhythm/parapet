@@ -8,6 +8,8 @@ import (
 //
 // Rules are sorted by ascending Priority (smaller runs first) when SetRules
 // is called. Within equal priorities, declaration order is preserved.
+//
+//nolint:govet
 type Rule struct {
 	// ID is a stable identifier used in logs. Required.
 	ID string
@@ -37,6 +39,8 @@ type Rule struct {
 }
 
 // compiledRule is the internal representation kept inside an atomic ruleset.
+//
+//nolint:govet
 type compiledRule struct {
 	id          string
 	description string

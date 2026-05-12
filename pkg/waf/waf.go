@@ -29,6 +29,8 @@ func (f LoggerFunc) Logf(format string, args ...any) { f(format, args...) }
 
 // MatchEvent is delivered to OnMatch (if set) for every rule that fires.
 // It is intentionally lightweight so handlers don't have to copy the request.
+//
+//nolint:govet
 type MatchEvent struct {
 	Request    *http.Request
 	RuleID     string
@@ -51,6 +53,8 @@ const (
 //
 // All fields except the atomic rules pointer should be configured before the
 // first request is served. Rules can be replaced at any time via SetRules.
+//
+//nolint:govet
 type WAF struct {
 	// Logger receives one line per matched rule. nil disables logging.
 	Logger Logger

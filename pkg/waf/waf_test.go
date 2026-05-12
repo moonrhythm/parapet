@@ -496,22 +496,3 @@ func itoa(i int) string {
 	}
 	return string(buf[pos:])
 }
-
-// escape is a tiny URL-encoder for fixture queries; avoids importing net/url
-// in test files where we already exercise it elsewhere.
-func escape(s string) string {
-	const hex = "0123456789ABCDEF"
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '/' || c == '.':
-			b.WriteByte('%')
-			b.WriteByte(hex[c>>4])
-			b.WriteByte(hex[c&0x0f])
-		default:
-			b.WriteByte(c)
-		}
-	}
-	return b.String()
-}
