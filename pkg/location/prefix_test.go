@@ -21,10 +21,12 @@ func TestPrefixMatcher(t *testing.T) {
 		Matched bool
 	}{
 		{"Exact Matched", "/path1", "/path1", true},
-		{"Prefix Matched", "/path1", "/path123", true},
+		{"Prefix Sub-path Matched", "/path1", "/path1/sub", true},
 		{"Prefix Slash Matched", "/path1/", "/path1/123", true},
 		{"Catch-all Matched", "", "/path", true},
 		{"Unmatched", "/path1", "/path2", false},
+		{"Boundary not crossed", "/path1", "/path123", false},
+		{"Boundary not crossed underscore", "/admin", "/admin_export", false},
 	}
 
 	for _, c := range cases {

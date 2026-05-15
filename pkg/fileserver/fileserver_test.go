@@ -89,6 +89,59 @@ func TestFileServerDirectoryListingDisabled(t *testing.T) {
 	assert.True(t, called, "directory should fall through to handler")
 }
 
+func TestFileServerRejectsSymlinkEscape(t *testing.T) {
+	t.Parallel()
+
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "secret.txt"), []byte("nope"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	root := t.TempDir()
+	linkPath := filepath.Join(root, "escape.txt")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), linkPath); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	m := New(root)
+	called := false
+	h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.WriteHeader(http.StatusNotFound)
+	}))
+
+	r := httptest.NewRequest("GET", "/escape.txt", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	assert.True(t, called, "symlink escaping the root must fall through to the not-found handler")
+}
+
+func TestFileServerAllowsInternalSymlink(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "real.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(root, "real.txt"), filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+
+	m := New(root)
+	h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("fallback should not run")
+	}))
+
+	r := httptest.NewRequest("GET", "/link.txt", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	body, _ := io.ReadAll(w.Body)
+	assert.Equal(t, "hi", string(body))
+}
+
 func TestFileServerListDirectoryEnabled(t *testing.T) {
 	t.Parallel()
 

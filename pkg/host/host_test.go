@@ -34,6 +34,12 @@ func TestHost(t *testing.T) {
 		{"Edge case #2", []string{"moonrhythm.io"}, ".com", false},
 		{"Edge case #3", []string{"moonrhythm.io"}, ".", false},
 		{"Edge case #4", []string{"moonrhythm.io"}, "", false},
+		{"Case insensitive request host", []string{"moonrhythm.io"}, "MoonRhythm.IO", true},
+		{"Case insensitive config host", []string{"MoonRhythm.IO"}, "moonrhythm.io", true},
+		{"Strip port from request host", []string{"moonrhythm.io"}, "moonrhythm.io:8080", true},
+		{"Strip trailing dot from request host", []string{"moonrhythm.io"}, "moonrhythm.io.", true},
+		{"Strip port wildcard", []string{"*.moonrhythm.io"}, "www.moonrhythm.io:443", true},
+		{"IPv6 with port", []string{"[::1]"}, "[::1]:8080", true},
 	}
 
 	for _, c := range cases {

@@ -3,6 +3,7 @@ package requestid_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -71,6 +72,37 @@ func TestRequestID(t *testing.T) {
 		w := httptest.NewRecorder()
 		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.NotEqual(t, r.Header.Get(DefaultHeader), value)
+		})).ServeHTTP(w, r)
+		assert.NotEqual(t, value, w.Header().Get(DefaultHeader))
+	})
+
+	t.Run("Reject invalid characters even with TrustProxy", func(t *testing.T) {
+		cases := []string{
+			"bad value with space",
+			"crlf\r\ninjection",
+			"tab\there",
+			"<script>",
+		}
+		for _, value := range cases {
+			m := RequestID{TrustProxy: true}
+			r := httptest.NewRequest("GET", "/", nil)
+			r.Header.Set(DefaultHeader, value)
+			w := httptest.NewRecorder()
+			m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.NotEqual(t, value, r.Header.Get(DefaultHeader), "input=%q", value)
+			})).ServeHTTP(w, r)
+			assert.NotEqual(t, value, w.Header().Get(DefaultHeader))
+		}
+	})
+
+	t.Run("Reject oversized id even with TrustProxy", func(t *testing.T) {
+		value := strings.Repeat("a", 129)
+		m := RequestID{TrustProxy: true}
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set(DefaultHeader, value)
+		w := httptest.NewRecorder()
+		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.NotEqual(t, value, r.Header.Get(DefaultHeader))
 		})).ServeHTTP(w, r)
 		assert.NotEqual(t, value, w.Header().Get(DefaultHeader))
 	})

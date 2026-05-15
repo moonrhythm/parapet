@@ -3,6 +3,7 @@ package parapet
 import (
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -110,20 +111,22 @@ func parseHost(s string) string {
 }
 
 func firstHost(s string) string {
-	i := strings.Index(s, ",")
-	if i < 0 {
-		return s
+	if i := strings.Index(s, ","); i >= 0 {
+		s = s[:i]
 	}
-	return s[:i]
+	return strings.TrimSpace(s)
 }
 
 func parseCIDRs(xs []string) []*net.IPNet {
-	var rs []*net.IPNet
+	rs := make([]*net.IPNet, 0, len(xs))
 	for _, x := range xs {
-		_, n, _ := net.ParseCIDR(x)
-		if n != nil {
-			rs = append(rs, n)
+		_, n, err := net.ParseCIDR(x)
+		if err != nil {
+			// Misconfigured trust list silently collapsing to an empty set
+			// is a security footgun; fail fast at setup time.
+			panic("parapet: invalid CIDR " + strconv.Quote(x) + ": " + err.Error())
 		}
+		rs = append(rs, n)
 	}
 	return rs
 }

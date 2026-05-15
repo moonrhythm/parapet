@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 
@@ -58,7 +59,12 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 	var p http.Handler
 	p = &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
-			req.URL.Path = singleJoiningSlash(targetPath.Path, req.URL.Path)
+			// Resolve dot-segments on the request path before joining so that
+			// requests like "/foo/../bar" cannot escape the configured prefix.
+			req.URL.Path = singleJoiningSlash(targetPath.Path, cleanRequestPath(req.URL.Path))
+			// RawPath may no longer correspond to Path after cleaning; clear it
+			// so net/url re-encodes Path on write.
+			req.URL.RawPath = ""
 
 			if targetPath.RawQuery == "" || req.URL.RawQuery == "" {
 				req.URL.RawQuery = targetPath.RawQuery + req.URL.RawQuery
@@ -116,6 +122,23 @@ func (m *Upstream) RoundTrip(r *http.Request) (*http.Response, error) {
 	resp, err := m.Transport.RoundTrip(r)
 	logger.Set(r.Context(), "upstream", r.URL.Host)
 	return resp, err
+}
+
+// cleanRequestPath resolves dot-segments from the request path while
+// preserving a trailing slash. An empty result is normalized to "/".
+func cleanRequestPath(p string) string {
+	if p == "" {
+		return "/"
+	}
+	trailing := strings.HasSuffix(p, "/")
+	cleaned := path.Clean(p)
+	if cleaned == "." {
+		cleaned = "/"
+	}
+	if trailing && !strings.HasSuffix(cleaned, "/") {
+		cleaned += "/"
+	}
+	return cleaned
 }
 
 func singleJoiningSlash(a, b string) string {
