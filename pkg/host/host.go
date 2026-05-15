@@ -1,6 +1,7 @@
 package host
 
 import (
+	"net"
 	"net/http"
 	"strings"
 
@@ -9,10 +10,10 @@ import (
 
 // New creates new host block
 func New(host ...string) *block.Block {
-	// build host map
+	// build host map (normalized: lowercase, no port, no trailing dot)
 	hostMap := make(map[string]bool)
 	for _, x := range host {
-		hostMap[x] = true
+		hostMap[normalizeHost(x)] = true
 	}
 
 	if len(host) == 0 {
@@ -24,25 +25,45 @@ func New(host ...string) *block.Block {
 	}
 
 	return block.New(func(r *http.Request) bool {
+		h := normalizeHost(r.Host)
+
 		// exact match
-		if hostMap[r.Host] {
+		if hostMap[h] {
 			return true
 		}
 
 		// wildcard subdomains
-		host := r.Host
-		for host != "" {
-			i := strings.Index(host, ".")
+		for h != "" {
+			i := strings.Index(h, ".")
 			if i <= 0 {
 				break
 			}
 
-			if hostMap["*"+host[i:]] {
+			if hostMap["*"+h[i:]] {
 				return true
 			}
-			host = host[i+1:]
+			h = h[i+1:]
 		}
 
 		return false
 	})
+}
+
+// normalizeHost lowercases the host, strips any :port, and strips a single
+// trailing dot. The matcher is meant to be safe regardless of whether the
+// optional ToLower / StripPort middlewares are installed upstream.
+func normalizeHost(h string) string {
+	h = strings.ToLower(h)
+	if strings.Contains(h, ":") {
+		if host, _, err := net.SplitHostPort(h); err == nil {
+			h = host
+		} else if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+			// bare bracketed IPv6 literal without a port; SplitHostPort
+			// rejects it, so unwrap manually so it normalizes the same way
+			// as the "[::1]:8080" form.
+			h = h[1 : len(h)-1]
+		}
+	}
+	h = strings.TrimSuffix(h, ".")
+	return h
 }

@@ -27,7 +27,6 @@ func TestCIDR(t *testing.T) {
 		{"2rd Match", []string{"10.55.55.55/32", "10.0.0.0/8"}, "10.0.0.2", true},
 		{"Not Matched", []string{"10.0.1.1/32"}, "10.0.1.2", false},
 		{"Not Matched Hostname", []string{"10.0.1.1/32"}, "localhost", false},
-		{"Invalid CIDR", []string{"10.0.1.1"}, "10.0.1.1", false},
 	}
 
 	for _, c := range cases {
@@ -53,4 +52,15 @@ func TestCIDR(t *testing.T) {
 			assert.NotEqual(t, c.Matched, falled)
 		})
 	}
+}
+
+func TestCIDRPanicsOnInvalid(t *testing.T) {
+	t.Parallel()
+
+	assert.Panics(t, func() {
+		NewCIDR("10.0.1.1") // missing prefix length
+	})
+	assert.Panics(t, func() {
+		NewCIDR("10.0.0.0/8", "not-a-cidr")
+	})
 }

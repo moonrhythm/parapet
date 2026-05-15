@@ -90,6 +90,47 @@ func TestUpstream(t *testing.T) {
 		assert.True(t, called)
 	})
 
+	t.Run("Dot-segments are resolved before joining prefix", func(t *testing.T) {
+		// httptest.NewRequest parses the target through url.Parse, which
+		// normalizes "/api/../admin" too aggressively for this test;
+		// construct the request manually instead.
+		r := httptest.NewRequest("GET", "/", nil)
+		r.URL.Path = "/foo/../admin"
+		w := httptest.NewRecorder()
+
+		called := false
+		Upstream{
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					called = true
+					assert.Equal(t, "/prefix/admin", r.URL.Path)
+					return httptest.NewRecorder().Result(), nil
+				},
+			},
+			Path: "/prefix",
+		}.ServeHandler(nil).ServeHTTP(w, r)
+		assert.True(t, called)
+	})
+
+	t.Run("Traversal cannot escape configured prefix", func(t *testing.T) {
+		r := httptest.NewRequest("GET", "/", nil)
+		r.URL.Path = "/../../etc/passwd"
+		w := httptest.NewRecorder()
+
+		called := false
+		Upstream{
+			Transport: &mockTransport{
+				roundTripFunc: func(r *http.Request) (*http.Response, error) {
+					called = true
+					assert.Equal(t, "/prefix/etc/passwd", r.URL.Path)
+					return httptest.NewRecorder().Result(), nil
+				},
+			},
+			Path: "/prefix",
+		}.ServeHandler(nil).ServeHTTP(w, r)
+		assert.True(t, called)
+	})
+
 	t.Run("Override Host", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()

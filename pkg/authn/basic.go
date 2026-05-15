@@ -16,11 +16,16 @@ var (
 
 // Basic creates new basic auth middleware
 func Basic(username, password string) *BasicAuthenticator {
+	expectedUser := []byte(username)
+	expectedPass := []byte(password)
 	return &BasicAuthenticator{
 		Authenticate: func(_ *http.Request, u, p string) error {
-			ok := u == username &&
-				subtle.ConstantTimeCompare([]byte(p), []byte(password)) == 1
-			if !ok {
+			// Compare both fields in constant time and AND the results, so
+			// that timing reveals neither which field mismatched nor how many
+			// leading bytes matched.
+			userOK := subtle.ConstantTimeCompare([]byte(u), expectedUser)
+			passOK := subtle.ConstantTimeCompare([]byte(p), expectedPass)
+			if userOK&passOK != 1 {
 				return ErrInvalidCredentials
 			}
 			return nil

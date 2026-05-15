@@ -3,6 +3,8 @@ package fileserver
 import (
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 )
 
 // FileServer serves file
@@ -42,17 +44,56 @@ func (fs *fileSystem) Open(name string) (http.File, error) {
 		return nil, err
 	}
 
+	// Reject any opened path whose resolved real path escapes the configured
+	// root through a symlink. http.Dir cleans ".." but transparently follows
+	// symlinks via os.Open.
+	if osf, ok := f.(*os.File); ok {
+		if err := fs.checkInsideRoot(osf.Name()); err != nil {
+			f.Close()
+			return nil, err
+		}
+	}
+
 	if !fs.listDir {
 		fi, err := f.Stat()
 		if err != nil {
+			f.Close()
 			return nil, err
 		}
 		if fi.IsDir() {
+			f.Close()
 			return nil, os.ErrNotExist
 		}
 	}
 
 	return f, nil
+}
+
+func (fs *fileSystem) checkInsideRoot(target string) error {
+	realRoot, err := resolveReal(fs.root)
+	if err != nil {
+		return err
+	}
+	realTarget, err := resolveReal(target)
+	if err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(realRoot, realTarget)
+	if err != nil {
+		return os.ErrNotExist
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return os.ErrNotExist
+	}
+	return nil
+}
+
+func resolveReal(p string) (string, error) {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	return filepath.EvalSymlinks(abs)
 }
 
 type responseWriter struct {

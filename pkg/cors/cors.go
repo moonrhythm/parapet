@@ -47,6 +47,12 @@ func (m CORS) ServeHandler(h http.Handler) http.Handler {
 	if !m.AllowAllOrigins && m.AllowOrigins == nil {
 		panic("cors: AllowOrigins must be set if AllowAllOrigins is false")
 	}
+	if m.AllowAllOrigins && m.AllowCredentials {
+		// Browsers reject Access-Control-Allow-Origin: * combined with
+		// Access-Control-Allow-Credentials: true. Refuse the misconfig
+		// at setup time rather than silently emitting a broken policy.
+		panic("cors: AllowCredentials cannot be combined with AllowAllOrigins; set AllowOrigins instead")
+	}
 
 	preflightHeaders := make(http.Header)
 	headers := make(http.Header)

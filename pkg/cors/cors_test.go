@@ -71,7 +71,7 @@ func TestCORSPreflight(t *testing.T) {
 
 	called := false
 	m := &CORS{
-		AllowAllOrigins:  true,
+		AllowOrigins:     AllowOrigins("https://example.com"),
 		AllowMethods:     []string{"GET", "POST"},
 		AllowHeaders:     []string{"Content-Type", "Authorization"},
 		ExposeHeaders:    []string{"X-Custom"},
@@ -89,11 +89,23 @@ func TestCORSPreflight(t *testing.T) {
 
 	assert.False(t, called, "preflight should not invoke downstream")
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+	assert.Equal(t, "https://example.com", w.Header().Get("Access-Control-Allow-Origin"))
 	assert.Equal(t, "GET,POST", w.Header().Get("Access-Control-Allow-Methods"))
 	assert.Equal(t, "Content-Type,Authorization", w.Header().Get("Access-Control-Allow-Headers"))
 	assert.Equal(t, "true", w.Header().Get("Access-Control-Allow-Credentials"))
 	assert.Equal(t, "7200", w.Header().Get("Access-Control-Max-Age"))
+}
+
+func TestCORSPanicsOnAllowAllWithCredentials(t *testing.T) {
+	t.Parallel()
+
+	m := &CORS{
+		AllowAllOrigins:  true,
+		AllowCredentials: true,
+	}
+	assert.Panics(t, func() {
+		m.ServeHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	})
 }
 
 func TestCORSExposeHeadersOnNonPreflight(t *testing.T) {

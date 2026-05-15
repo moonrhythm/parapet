@@ -82,13 +82,15 @@ func TestParseCIDRs(t *testing.T) {
 	}
 }
 
-func TestParseCIDRsSkipsInvalid(t *testing.T) {
+func TestParseCIDRsPanicsOnInvalid(t *testing.T) {
 	t.Parallel()
 
-	ns := parseCIDRs([]string{"not-a-cidr", "1.1.1.1/32", ""})
-	if assert.Len(t, ns, 1) {
-		assert.Equal(t, "1.1.1.1/32", ns[0].String())
-	}
+	assert.Panics(t, func() {
+		parseCIDRs([]string{"not-a-cidr"})
+	})
+	assert.Panics(t, func() {
+		parseCIDRs([]string{"1.1.1.1/32", ""})
+	})
 }
 
 func TestFirstHost(t *testing.T) {
@@ -97,6 +99,9 @@ func TestFirstHost(t *testing.T) {
 	assert.Equal(t, "1.2.3.4", firstHost("1.2.3.4, 5.6.7.8, 9.9.9.9"))
 	assert.Equal(t, "1.2.3.4", firstHost("1.2.3.4"))
 	assert.Equal(t, "", firstHost(""))
+	// Leading whitespace from " hop1, hop2" or after split must be stripped.
+	assert.Equal(t, "1.2.3.4", firstHost(" 1.2.3.4 , 5.6.7.8"))
+	assert.Equal(t, "1.2.3.4", firstHost("\t1.2.3.4"))
 }
 
 func TestParseHost(t *testing.T) {

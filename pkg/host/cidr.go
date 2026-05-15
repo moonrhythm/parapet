@@ -3,21 +3,26 @@ package host
 import (
 	"net"
 	"net/http"
+	"strconv"
 
 	"github.com/moonrhythm/parapet/pkg/block"
 )
 
-// NewCIDR creates new CIDR host matcher block
+// NewCIDR creates new CIDR host matcher block.
+//
+// Panics on any unparsable CIDR so a configuration typo cannot silently
+// collapse the matcher to an empty (always-false) set.
 func NewCIDR(pattern ...string) *block.Block {
-	var nets []*net.IPNet
-	for _, p := range pattern {
-		_, n, _ := net.ParseCIDR(p)
-		if n != nil {
-			nets = append(nets, n)
-		}
-	}
-	if len(nets) == 0 {
+	if len(pattern) == 0 {
 		return block.New(func(_ *http.Request) bool { return false })
+	}
+	nets := make([]*net.IPNet, 0, len(pattern))
+	for _, p := range pattern {
+		_, n, err := net.ParseCIDR(p)
+		if err != nil {
+			panic("host: invalid CIDR " + strconv.Quote(p) + ": " + err.Error())
+		}
+		nets = append(nets, n)
 	}
 
 	return block.New(func(r *http.Request) bool {
