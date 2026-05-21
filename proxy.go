@@ -65,26 +65,38 @@ func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.distrust(w, r)
 }
 
+// Pre-built single-value slices for the constant proto values let us assign
+// directly into the header map without allocating a fresh []string{value} on
+// every request.
+var (
+	xfpHTTP  = []string{"http"}
+	xfpHTTPS = []string{"https"}
+)
+
 func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
+	// The header constants are already in canonical form, so we read and write
+	// the header map directly to skip CanonicalMIMEHeaderKey on every access.
+	h := r.Header
+
 	// TODO: handle compute full forwarded for from server
 	if m.ComputeFullForwardedFor {
 		remoteIP := parseHost(r.RemoteAddr)
-		if p := r.Header.Get(headerXForwardedFor); p == "" {
-			r.Header.Set(headerXForwardedFor, remoteIP)
+		if p := headerFirst(h, headerXForwardedFor); p == "" {
+			h[headerXForwardedFor] = []string{remoteIP}
 		} else {
-			r.Header.Set(headerXForwardedFor, p+", "+remoteIP)
+			h[headerXForwardedFor] = []string{p + ", " + remoteIP}
 		}
 	}
 
-	if r.Header.Get(headerXRealIP) == "" {
-		r.Header.Set(headerXRealIP, firstHost(r.Header.Get(headerXForwardedFor)))
+	if headerFirst(h, headerXRealIP) == "" {
+		h[headerXRealIP] = []string{firstHost(headerFirst(h, headerXForwardedFor))}
 	}
 
-	if r.Header.Get(headerXForwardedProto) == "" {
+	if headerFirst(h, headerXForwardedProto) == "" {
 		if r.TLS == nil {
-			r.Header.Set(headerXForwardedProto, "http")
+			h[headerXForwardedProto] = xfpHTTP
 		} else {
-			r.Header.Set(headerXForwardedProto, "https")
+			h[headerXForwardedProto] = xfpHTTPS
 		}
 	}
 
@@ -92,17 +104,30 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *proxy) distrust(w http.ResponseWriter, r *http.Request) {
+	h := r.Header
 	remoteIP := parseHost(r.RemoteAddr)
-	r.Header.Set(headerXForwardedFor, remoteIP)
-	r.Header.Set(headerXRealIP, remoteIP)
+	v := []string{remoteIP}
+	h[headerXForwardedFor] = v
+	h[headerXRealIP] = v
 
 	if r.TLS == nil {
-		r.Header.Set(headerXForwardedProto, "http")
+		h[headerXForwardedProto] = xfpHTTP
 	} else {
-		r.Header.Set(headerXForwardedProto, "https")
+		h[headerXForwardedProto] = xfpHTTPS
 	}
 
 	m.Handler.ServeHTTP(w, r)
+}
+
+// headerFirst returns the first value for a header key without going through
+// http.Header.Get's CanonicalMIMEHeaderKey path. Callers must pass an
+// already-canonical key.
+func headerFirst(h http.Header, key string) string {
+	v := h[key]
+	if len(v) == 0 {
+		return ""
+	}
+	return v[0]
 }
 
 func parseHost(s string) string {
