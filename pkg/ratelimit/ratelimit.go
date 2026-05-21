@@ -72,7 +72,19 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 		m.ExceededHandler = defaultExceededHandler
 	}
 
-	modifyRW := m.ReleaseOnWriteHeader || m.ReleaseOnHijacked
+	// Fast path: no response-writer wrapping needed. Avoids allocating a
+	// release closure and an escaped bool on every request.
+	if !m.ReleaseOnWriteHeader && !m.ReleaseOnHijacked {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			key := m.Key(r)
+			if !m.Strategy.Take(key) {
+				m.ExceededHandler(w, r, m.Strategy.After(key))
+				return
+			}
+			defer m.Strategy.Put(key) // use defer to always put token back when panic
+			h.ServeHTTP(w, r)
+		})
+	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := m.Key(r)
@@ -80,39 +92,38 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 			m.ExceededHandler(w, r, m.Strategy.After(key))
 			return
 		}
-		released := false
-		release := func() {
-			if released {
-				return
-			}
-			released = true
-			m.Strategy.Put(key)
-		}
-		defer release() // use defer to always put token back when panic
 
-		if modifyRW {
-			nw := responseWriter{
-				ResponseWriter: w,
-			}
-			if m.ReleaseOnWriteHeader {
-				nw.OnWriteHeader = release
-			}
-			if m.ReleaseOnHijacked {
-				nw.OnHijack = release
-			}
-			w = &nw
+		// Release state lives inside the responseWriter, which already
+		// escapes — avoids allocating a separate closure + bool.
+		nw := &responseWriter{
+			ResponseWriter:       w,
+			strategy:             m.Strategy,
+			key:                  key,
+			releaseOnWriteHeader: m.ReleaseOnWriteHeader,
+			releaseOnHijack:      m.ReleaseOnHijacked,
 		}
-
-		h.ServeHTTP(w, r)
+		defer nw.release() // use defer to always put token back when panic
+		h.ServeHTTP(nw, r)
 	})
 }
 
 type responseWriter struct {
 	http.ResponseWriter
-	OnWriteHeader func()
-	OnHijack      func()
+	strategy Strategy
+	key      string
 
-	wroteHeader bool
+	wroteHeader          bool
+	released             bool
+	releaseOnWriteHeader bool
+	releaseOnHijack      bool
+}
+
+func (w *responseWriter) release() {
+	if w.released {
+		return
+	}
+	w.released = true
+	w.strategy.Put(w.key)
 }
 
 func (w *responseWriter) WriteHeader(statusCode int) {
@@ -120,8 +131,8 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 		return
 	}
 	w.wroteHeader = true
-	if w.OnWriteHeader != nil {
-		w.OnWriteHeader()
+	if w.releaseOnWriteHeader {
+		w.release()
 	}
 	w.ResponseWriter.WriteHeader(statusCode)
 }
@@ -155,8 +166,8 @@ func (w *responseWriter) Flush() {
 // Hijack implements Hijacker interface
 func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	if nw, ok := w.ResponseWriter.(http.Hijacker); ok {
-		if w.OnHijack != nil {
-			w.OnHijack()
+		if w.releaseOnHijack {
+			w.release()
 		}
 		return nw.Hijack()
 	}

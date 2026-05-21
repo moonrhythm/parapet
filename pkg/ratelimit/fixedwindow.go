@@ -51,8 +51,11 @@ func (b *FixedWindowStrategy) Take(key string) bool {
 	if b.lastWindow != currentWindow {
 		// window outdated, create new window
 		b.lastWindow = currentWindow
-		if len(b.storage) > 0 || b.storage == nil {
+		if b.storage == nil {
 			b.storage = make(map[string]int)
+		} else if len(b.storage) > 0 {
+			// reuse existing map to avoid heap churn at window boundary
+			clear(b.storage)
 		}
 	}
 
