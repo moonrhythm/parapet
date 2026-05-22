@@ -8,10 +8,7 @@ import "net/http"
 // appends directly to the header map, skipping CanonicalMIMEHeaderKey
 // in http.Header.Add.
 func AddRequest(headerpairs ...string) *RequestInterceptor {
-	hs := buildHeaders(headerpairs)
-	for i := range hs {
-		hs[i].Key = http.CanonicalHeaderKey(hs[i].Key)
-	}
+	hs := buildCanonicalHeaders(headerpairs)
 
 	return InterceptRequest(func(h http.Header) {
 		for _, p := range hs {
@@ -22,10 +19,7 @@ func AddRequest(headerpairs ...string) *RequestInterceptor {
 
 // AddResponse creates new response interceptor for add headers.
 func AddResponse(headerpairs ...string) *ResponseInterceptor {
-	hs := buildHeaders(headerpairs)
-	for i := range hs {
-		hs[i].Key = http.CanonicalHeaderKey(hs[i].Key)
-	}
+	hs := buildCanonicalHeaders(headerpairs)
 
 	return InterceptResponse(func(w ResponseHeaderWriter) {
 		h := w.Header()

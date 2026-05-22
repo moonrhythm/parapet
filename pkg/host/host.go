@@ -54,8 +54,10 @@ func New(host ...string) *block.Block {
 // optional ToLower / StripPort middlewares are installed upstream.
 //
 // The fast path detects an already-normalized input (lowercase ASCII, no
-// port, no trailing dot, no bracket) in a single scan and returns it
-// unchanged. The slow path falls back to the general handling.
+// colon, no trailing dot) in a single scan and returns it unchanged. The
+// slow path falls back to the general handling and matches the original
+// behavior — port stripping and bracket unwrapping only run when the input
+// actually contains a ':'.
 func normalizeHost(h string) string {
 	if h == "" {
 		return h
@@ -63,32 +65,31 @@ func normalizeHost(h string) string {
 
 	var (
 		needsLower bool
-		colonIdx   = -1
+		hasColon   bool
 	)
-	bracket := h[0] == '['
 	n := len(h)
 	for i := 0; i < n; i++ {
 		c := h[i]
 		if c >= 'A' && c <= 'Z' {
 			needsLower = true
 		} else if c == ':' {
-			colonIdx = i
+			hasColon = true
 		}
 	}
 	trailingDot := h[n-1] == '.'
 
-	if !needsLower && !bracket && colonIdx < 0 && !trailingDot {
+	if !needsLower && !hasColon && !trailingDot {
 		return h
 	}
 
-	return normalizeHostSlow(h, bracket, colonIdx, trailingDot, needsLower)
+	return normalizeHostSlow(h, hasColon, trailingDot, needsLower)
 }
 
-func normalizeHostSlow(h string, bracket bool, colonIdx int, trailingDot, needsLower bool) string {
-	if bracket || colonIdx >= 0 {
+func normalizeHostSlow(h string, hasColon, trailingDot, needsLower bool) string {
+	if hasColon {
 		if host, _, err := net.SplitHostPort(h); err == nil {
 			h = host
-		} else if bracket && h[len(h)-1] == ']' {
+		} else if h[0] == '[' && h[len(h)-1] == ']' {
 			// bare bracketed IPv6 literal without a port; SplitHostPort
 			// rejects it, so unwrap manually so it normalizes the same way
 			// as the "[::1]:8080" form.

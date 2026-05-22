@@ -19,21 +19,17 @@ func buildHeaders(pairs []string) []Header {
 	return hs
 }
 
-// canonHeader carries a pre-canonicalized header key and a pre-built
-// single-value slice so the per-request path skips both
-// CanonicalMIMEHeaderKey and the slice allocation in http.Header.Set.
-type canonHeader struct {
-	Key   string
-	Value []string
-}
-
-func buildCanonHeaders(pairs []string) []canonHeader {
-	var hs []canonHeader
-	for i := 1; i < len(pairs); i += 2 {
-		hs = append(hs, canonHeader{
-			Key:   http.CanonicalHeaderKey(pairs[i-1]),
-			Value: []string{pairs[i]},
-		})
+// buildCanonicalHeaders is buildHeaders with the key canonicalized once at
+// construction. Per-request paths can then use direct map operations and skip
+// CanonicalMIMEHeaderKey on every call.
+//
+// Crucially, the per-request path must still allocate a fresh []string{value}
+// for each Set: other middleware (e.g. MapRequest) mutate header value slices
+// in place, so any pre-built slice would leak mutations across requests.
+func buildCanonicalHeaders(pairs []string) []Header {
+	hs := buildHeaders(pairs)
+	for i := range hs {
+		hs[i].Key = http.CanonicalHeaderKey(hs[i].Key)
 	}
 	return hs
 }

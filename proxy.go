@@ -65,17 +65,12 @@ func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	m.distrust(w, r)
 }
 
-// Pre-built single-value slices for the constant proto values let us assign
-// directly into the header map without allocating a fresh []string{value} on
-// every request.
-var (
-	xfpHTTP  = []string{"http"}
-	xfpHTTPS = []string{"https"}
-)
-
 func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 	// The header constants are already in canonical form, so we read and write
 	// the header map directly to skip CanonicalMIMEHeaderKey on every access.
+	// Each write allocates its own []string{value}: downstream middleware
+	// (e.g. headers.MapRequest) may mutate header value slices in place, so
+	// any shared/global slice would leak across requests.
 	h := r.Header
 
 	// TODO: handle compute full forwarded for from server
@@ -94,9 +89,9 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 
 	if headerFirst(h, headerXForwardedProto) == "" {
 		if r.TLS == nil {
-			h[headerXForwardedProto] = xfpHTTP
+			h[headerXForwardedProto] = []string{"http"}
 		} else {
-			h[headerXForwardedProto] = xfpHTTPS
+			h[headerXForwardedProto] = []string{"https"}
 		}
 	}
 
@@ -106,14 +101,15 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 func (m *proxy) distrust(w http.ResponseWriter, r *http.Request) {
 	h := r.Header
 	remoteIP := parseHost(r.RemoteAddr)
-	v := []string{remoteIP}
-	h[headerXForwardedFor] = v
-	h[headerXRealIP] = v
+	// Independent slices for XFF and XRI: sharing one would couple in-place
+	// mutations of one header to the other within a single request.
+	h[headerXForwardedFor] = []string{remoteIP}
+	h[headerXRealIP] = []string{remoteIP}
 
 	if r.TLS == nil {
-		h[headerXForwardedProto] = xfpHTTP
+		h[headerXForwardedProto] = []string{"http"}
 	} else {
-		h[headerXForwardedProto] = xfpHTTPS
+		h[headerXForwardedProto] = []string{"https"}
 	}
 
 	m.Handler.ServeHTTP(w, r)
