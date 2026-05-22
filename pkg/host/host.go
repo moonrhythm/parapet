@@ -34,7 +34,7 @@ func New(host ...string) *block.Block {
 
 		// wildcard subdomains
 		for h != "" {
-			i := strings.Index(h, ".")
+			i := strings.IndexByte(h, '.')
 			if i <= 0 {
 				break
 			}
@@ -52,18 +52,60 @@ func New(host ...string) *block.Block {
 // normalizeHost lowercases the host, strips any :port, and strips a single
 // trailing dot. The matcher is meant to be safe regardless of whether the
 // optional ToLower / StripPort middlewares are installed upstream.
+//
+// The fast path detects an already-normalized input (lowercase ASCII, no
+// colon, no trailing dot) in a single scan and returns it unchanged. The
+// slow path falls back to the general handling and matches the original
+// behavior — port stripping and bracket unwrapping only run when the input
+// actually contains a ':'.
 func normalizeHost(h string) string {
-	h = strings.ToLower(h)
-	if strings.Contains(h, ":") {
+	if h == "" {
+		return h
+	}
+
+	var (
+		needsLower bool
+		hasColon   bool
+	)
+	n := len(h)
+	for i := 0; i < n; i++ {
+		c := h[i]
+		if c >= 'A' && c <= 'Z' {
+			needsLower = true
+		} else if c == ':' {
+			hasColon = true
+		}
+	}
+	trailingDot := h[n-1] == '.'
+
+	if !needsLower && !hasColon && !trailingDot {
+		return h
+	}
+
+	return normalizeHostSlow(h, hasColon, trailingDot, needsLower)
+}
+
+func normalizeHostSlow(h string, hasColon, trailingDot, needsLower bool) string {
+	if hasColon {
 		if host, _, err := net.SplitHostPort(h); err == nil {
 			h = host
-		} else if strings.HasPrefix(h, "[") && strings.HasSuffix(h, "]") {
+		} else if h[0] == '[' && h[len(h)-1] == ']' {
 			// bare bracketed IPv6 literal without a port; SplitHostPort
 			// rejects it, so unwrap manually so it normalizes the same way
 			// as the "[::1]:8080" form.
 			h = h[1 : len(h)-1]
 		}
+		// after splitting, the trailing dot (if any) might have been
+		// stripped along with the port; recompute.
+		if len(h) > 0 {
+			trailingDot = h[len(h)-1] == '.'
+		}
 	}
-	h = strings.TrimSuffix(h, ".")
+	if trailingDot {
+		h = h[:len(h)-1]
+	}
+	if needsLower {
+		h = strings.ToLower(h)
+	}
 	return h
 }

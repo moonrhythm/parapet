@@ -148,3 +148,45 @@ func TestProxyTrustComputesXFFAppendsRemote(t *testing.T) {
 		}),
 	}).ServeHTTP(w, r)
 }
+
+// The proxy must not share value slices between X-Forwarded-For and
+// X-Real-Ip in distrust: downstream code that mutates one header's slice
+// in place (or appends with cap room) must not surprise the other.
+func TestProxyDistrustWritesIndependentSlices(t *testing.T) {
+	t.Parallel()
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.1:12345"
+	(&proxy{
+		Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			xff := r.Header["X-Forwarded-For"]
+			xri := r.Header["X-Real-Ip"]
+			if assert.Len(t, xff, 1) && assert.Len(t, xri, 1) {
+				// Mutating XFF's backing array must not leak into XRI.
+				xff[0] = "mutated"
+				assert.Equal(t, "10.0.0.1", xri[0])
+			}
+		}),
+	}).ServeHTTP(httptest.NewRecorder(), r)
+}
+
+// The proxy must not write package-global slices into r.Header — any
+// downstream in-place mutation would corrupt every future request.
+func TestProxyXForwardedProtoIsNotGlobalSlice(t *testing.T) {
+	t.Parallel()
+
+	r1 := httptest.NewRequest("GET", "/", nil)
+	r1.RemoteAddr = "10.0.0.1:12345"
+	(&proxy{Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		v := r.Header["X-Forwarded-Proto"]
+		if assert.Len(t, v, 1) {
+			v[0] = "mutated"
+		}
+	})}).ServeHTTP(httptest.NewRecorder(), r1)
+
+	r2 := httptest.NewRequest("GET", "/", nil)
+	r2.RemoteAddr = "10.0.0.2:12345"
+	(&proxy{Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "http", r.Header.Get("X-Forwarded-Proto"))
+	})}).ServeHTTP(httptest.NewRecorder(), r2)
+}
