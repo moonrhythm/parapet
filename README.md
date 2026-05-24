@@ -214,23 +214,34 @@ Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes fro
 
 ## Performance tuning
 
-`Server.EnableSharedProtoSlice()` makes that server's proxy write a single
-shared `[]string` for `X-Forwarded-Proto` instead of allocating a fresh slice
-per request, saving one allocation on every request that sets the header (~16%
-on the distrust path in the proxy benchmarks). It is off by default and scoped
-to the server it is called on.
+`Server.ShareProtoSlice` makes that server's proxy write a single shared
+`[]string` for `X-Forwarded-Proto` instead of allocating a fresh slice per
+request, saving one allocation on every request that sets the header (~16% on
+the distrust path in the proxy benchmarks). It is off by default and scoped to
+the server.
 
 This is **unsafe if any middleware mutates the `X-Forwarded-Proto` value slice in
 place** — e.g. `headers.MapRequest("X-Forwarded-Proto", …)` or code doing
 `r.Header["X-Forwarded-Proto"][0] = …` — because the mutation would corrupt the
 shared slice for every subsequent request. Appending (`headers.AddRequest`) is
-safe. Enable it only if you control the whole middleware chain, and call it once
-at startup before serving (it panics if called after the server starts):
+safe. Enable it only if you control the whole middleware chain, and set it
+before serving:
 
 ```go
 s := parapet.NewBackend()
-s.EnableSharedProtoSlice()
+s.ShareProtoSlice = true
 ```
+
+The `hsts` and `authn` middlewares expose the same opt-in for their fixed
+response headers via a `ShareValueSlice` field (off by default), sharing one
+`Strict-Transport-Security` / `WWW-Authenticate` slice across requests:
+
+```go
+hsts.HSTS{MaxAge: 365 * 24 * time.Hour, ShareValueSlice: true}
+```
+
+The same caveat applies — only enable it when nothing in the chain mutates that
+response header's value slice in place.
 
 ## License
 

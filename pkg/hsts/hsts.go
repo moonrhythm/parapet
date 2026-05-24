@@ -13,6 +13,13 @@ type HSTS struct {
 	MaxAge            time.Duration
 	IncludeSubDomains bool
 	Preload           bool
+
+	// ShareValueSlice writes the Strict-Transport-Security value from a single
+	// slice shared across requests instead of allocating one per request. The
+	// value is fixed at construction, so this is safe as long as nothing
+	// mutates the response header value slice in place. Off by default; see
+	// header.SetShared.
+	ShareValueSlice bool
 }
 
 // Default returns default hsts
@@ -41,6 +48,16 @@ func (m HSTS) ServeHandler(h http.Handler) http.Handler {
 	}
 	if m.Preload {
 		hs += "; preload"
+	}
+
+	if m.ShareValueSlice {
+		// Value is fixed for the life of this middleware: build the slice once
+		// and share it across requests instead of allocating per request.
+		hsValue := []string{hs}
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			header.SetShared(w.Header(), header.StrictTransportSecurity, hsValue)
+			h.ServeHTTP(w, r)
+		})
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
