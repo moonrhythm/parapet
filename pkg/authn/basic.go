@@ -39,6 +39,13 @@ func Basic(username, password string) *BasicAuthenticator {
 type BasicAuthenticator struct {
 	Realm        string
 	Authenticate func(r *http.Request, username, password string) error
+
+	// ShareValueSlice writes the WWW-Authenticate value from a single slice
+	// shared across requests instead of allocating one per unauthenticated
+	// response. The value is fixed at construction (it depends only on Realm),
+	// so this is safe as long as nothing mutates the response header value
+	// slice in place. Off by default; see header.SetShared.
+	ShareValueSlice bool
 }
 
 // ServeHandler implements middleware interface
@@ -49,7 +56,8 @@ func (m BasicAuthenticator) ServeHandler(h http.Handler) http.Handler {
 	}
 
 	return Authenticator{
-		Type: t,
+		Type:            t,
+		ShareValueSlice: m.ShareValueSlice,
 		Authenticate: func(r *http.Request) error {
 			username, password, ok := r.BasicAuth()
 			header.Del(r.Header, header.Authorization)

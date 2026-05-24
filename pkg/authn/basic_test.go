@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	. "github.com/moonrhythm/parapet/pkg/authn"
+	"github.com/moonrhythm/parapet/pkg/header"
 )
 
 func TestBasic(t *testing.T) {
@@ -58,5 +59,28 @@ func TestBasic(t *testing.T) {
 		m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {})).ServeHTTP(w, r)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
 		assert.Equal(t, `Basic realm="test"`, w.Header().Get("WWW-Authenticate"))
+	})
+
+	t.Run("Share Value Slice", func(t *testing.T) {
+		m := Basic("root", "pass")
+		m.Realm = "test"
+		m.ShareValueSlice = true
+		h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			assert.Fail(t, "must not be called")
+		}))
+
+		serve := func() []string {
+			r := httptest.NewRequest("GET", "/", nil)
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, r)
+			assert.Equal(t, http.StatusUnauthorized, w.Code)
+			assert.Equal(t, `Basic realm="test"`, w.Header().Get("WWW-Authenticate"))
+			return w.Header()[header.WWWAuthenticate]
+		}
+
+		// the same backing slice is reused across unauthenticated responses
+		v1 := serve()
+		v2 := serve()
+		assert.Same(t, &v1[0], &v2[0])
 	})
 }
