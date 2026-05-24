@@ -5,6 +5,7 @@ go 1.25.0
 require (
 	cloud.google.com/go/storage v1.62.2
 	contrib.go.opencensus.io/exporter/stackdriver v0.13.14
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/google/brotli/go/cbrotli v0.0.0-20240919160234-350100a5bb9d
 	github.com/google/cel-go v0.28.1
@@ -39,7 +40,6 @@ require (
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0 // indirect
 	github.com/envoyproxy/protoc-gen-validate v1.3.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
