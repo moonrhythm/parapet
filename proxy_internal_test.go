@@ -244,10 +244,10 @@ func TestProxySharedProtoSlice(t *testing.T) {
 	}).ServeHTTP(httptest.NewRecorder(), r)
 }
 
-// TestServerEnableSharedProtoSlice covers the Server-level wiring: the setting
-// is per-server, off by default, threaded into the proxy that configHandler
-// builds, and locked once the server starts serving.
-func TestServerEnableSharedProtoSlice(t *testing.T) {
+// TestServerShareProtoSlice covers the Server-level wiring: the setting is
+// per-server, off by default, and threaded into the proxy that configHandler
+// builds.
+func TestServerShareProtoSlice(t *testing.T) {
 	t.Parallel()
 
 	t.Run("off by default", func(t *testing.T) {
@@ -259,18 +259,10 @@ func TestServerEnableSharedProtoSlice(t *testing.T) {
 	})
 
 	t.Run("enabled threads into the proxy", func(t *testing.T) {
-		s := &Server{}
-		s.EnableSharedProtoSlice()
-		assert.True(t, s.sharedProtoSlice)
+		s := &Server{ShareProtoSlice: true}
 		s.configHandler()
 		if p, ok := s.s.Handler.(*proxy); assert.True(t, ok) {
 			assert.True(t, p.shareProtoSlice)
 		}
-	})
-
-	t.Run("panics after serve", func(t *testing.T) {
-		s := &Server{}
-		s.configHandler() // builds the handler, as the first request would
-		assert.Panics(t, func() { s.EnableSharedProtoSlice() })
 	})
 }

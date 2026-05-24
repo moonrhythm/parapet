@@ -49,6 +49,23 @@ func Set(h http.Header, key, value string) {
 	h[key] = []string{value}
 }
 
+// SetShared assigns a pre-built value slice directly into the header map,
+// sharing its backing array across every call instead of allocating a fresh
+// []string{value} per request the way Set does.
+//
+// Use it only for values fixed at construction time, and only on response
+// headers: the shared slice must be treated as immutable. parapet's own
+// middleware never mutate response header value slices in place — MapResponse
+// rebuilds the slice, and only MapRequest mutates in place (request headers
+// only) — so sharing is safe response-side. The cors middleware shares its
+// precomputed header slices the same way.
+func SetShared(h http.Header, key string, vs []string) {
+	if h == nil {
+		return
+	}
+	h[key] = vs
+}
+
 func Add(h http.Header, key, value string) {
 	if h == nil {
 		return

@@ -45,7 +45,7 @@ const (
 )
 
 // xfpHTTP and xfpHTTPS back the shared X-Forwarded-Proto slice fast path.
-// They must never be mutated; see Server.EnableSharedProtoSlice.
+// They must never be mutated; see Server.ShareProtoSlice.
 var (
 	xfpHTTP  = []string{"http"}
 	xfpHTTPS = []string{"https"}
@@ -59,12 +59,12 @@ type proxy struct {
 
 	// shareProtoSlice, when set, makes protoValue return a shared package-global
 	// slice for X-Forwarded-Proto instead of allocating a fresh one per request.
-	// Set from Server.EnableSharedProtoSlice when the proxy is built.
+	// Set from Server.ShareProtoSlice when the proxy is built.
 	shareProtoSlice bool
 }
 
 // protoValue returns the X-Forwarded-Proto value slice for the request's
-// scheme. When shareProtoSlice is set (see Server.EnableSharedProtoSlice) it
+// scheme. When shareProtoSlice is set (see Server.ShareProtoSlice) it
 // returns a shared package-global slice; otherwise it allocates a fresh slice
 // (the safe default).
 func (m *proxy) protoValue(isTLS bool) []string {
@@ -101,7 +101,7 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 	// always allocate a fresh []string: downstream middleware (e.g.
 	// headers.MapRequest) may mutate header value slices in place, so sharing
 	// would leak across requests. The X-Forwarded-Proto value comes from a
-	// fixed pair of constants and may be shared via EnableSharedProtoSlice.
+	// fixed pair of constants and may be shared via Server.ShareProtoSlice.
 	h := r.Header
 
 	// TODO: handle compute full forwarded for from server
