@@ -36,10 +36,20 @@ func TestHost(t *testing.T) {
 		{"Edge case #4", []string{"moonrhythm.io"}, "", false},
 		{"Case insensitive request host", []string{"moonrhythm.io"}, "MoonRhythm.IO", true},
 		{"Case insensitive config host", []string{"MoonRhythm.IO"}, "moonrhythm.io", true},
+		// Non-ASCII case folding: the only uppercase char is non-ASCII, so the
+		// ASCII A-Z scan alone would miss it. Must still fold like the original
+		// unconditional strings.ToLower.
+		{"Case insensitive non-ASCII request host", []string{"éxample.io"}, "Éxample.io", true},
+		{"Case insensitive non-ASCII config host", []string{"Éxample.io"}, "éxample.io", true},
 		{"Strip port from request host", []string{"moonrhythm.io"}, "moonrhythm.io:8080", true},
 		{"Strip trailing dot from request host", []string{"moonrhythm.io"}, "moonrhythm.io.", true},
 		{"Strip port wildcard", []string{"*.moonrhythm.io"}, "www.moonrhythm.io:443", true},
 		{"IPv6 with port", []string{"[::1]"}, "[::1]:8080", true},
+		// Malformed bracketed-but-colonless inputs must round-trip through the
+		// matcher with brackets intact, matching the pre-optimization behavior
+		// (the bracket-unwrap path only fires when a port separator is present).
+		{"Bracketed no colon configured matches itself", []string{"[host]"}, "[host]", true},
+		{"Bracketed no colon does not strip brackets", []string{"host"}, "[host]", false},
 	}
 
 	for _, c := range cases {

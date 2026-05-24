@@ -3,12 +3,34 @@ package headers_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	. "github.com/moonrhythm/parapet/pkg/headers"
 )
+
+// SetRequest must allocate a fresh value slice per request: downstream
+// middleware like MapRequest mutates header value slices in place, so any
+// shared/pre-built slice would leak mutations across requests.
+func TestSetRequestNoSharedSliceAcrossRequests(t *testing.T) {
+	t.Parallel()
+
+	set := SetRequest("X-Custom", "value")
+	mapUpper := MapRequest("X-Custom", strings.ToUpper)
+	chain := set.ServeHandler(mapUpper.ServeHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})))
+
+	// First request: MapRequest mutates the value slice in place.
+	chain.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+
+	// Second request through the same SetRequest must still see "value".
+	got := ""
+	set.ServeHandler(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Custom")
+	})).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+	assert.Equal(t, "value", got)
+}
 
 func TestSetRequest(t *testing.T) {
 	t.Parallel()
