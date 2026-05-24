@@ -44,11 +44,40 @@ const (
 	headerXRealIP         = "X-Real-Ip"
 )
 
+// xfpHTTP and xfpHTTPS back the shared X-Forwarded-Proto slice fast path.
+// They must never be mutated; see Server.EnableSharedProtoSlice.
+var (
+	xfpHTTP  = []string{"http"}
+	xfpHTTPS = []string{"https"}
+)
+
 //nolint:govet
 type proxy struct {
 	Trust                   func(r *http.Request) bool
 	ComputeFullForwardedFor bool
 	Handler                 http.Handler
+
+	// shareProtoSlice, when set, makes protoValue return a shared package-global
+	// slice for X-Forwarded-Proto instead of allocating a fresh one per request.
+	// Set from Server.EnableSharedProtoSlice when the proxy is built.
+	shareProtoSlice bool
+}
+
+// protoValue returns the X-Forwarded-Proto value slice for the request's
+// scheme. When shareProtoSlice is set (see Server.EnableSharedProtoSlice) it
+// returns a shared package-global slice; otherwise it allocates a fresh slice
+// (the safe default).
+func (m *proxy) protoValue(isTLS bool) []string {
+	if m.shareProtoSlice {
+		if isTLS {
+			return xfpHTTPS
+		}
+		return xfpHTTP
+	}
+	if isTLS {
+		return []string{"https"}
+	}
+	return []string{"http"}
 }
 
 func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -68,9 +97,11 @@ func (m *proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 	// The header constants are already in canonical form, so we read and write
 	// the header map directly to skip CanonicalMIMEHeaderKey on every access.
-	// Each write allocates its own []string{value}: downstream middleware
-	// (e.g. headers.MapRequest) may mutate header value slices in place, so
-	// any shared/global slice would leak across requests.
+	// The X-Forwarded-For / X-Real-Ip writes carry the dynamic remote IP and
+	// always allocate a fresh []string: downstream middleware (e.g.
+	// headers.MapRequest) may mutate header value slices in place, so sharing
+	// would leak across requests. The X-Forwarded-Proto value comes from a
+	// fixed pair of constants and may be shared via EnableSharedProtoSlice.
 	h := r.Header
 
 	// TODO: handle compute full forwarded for from server
@@ -88,11 +119,7 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if headerFirst(h, headerXForwardedProto) == "" {
-		if r.TLS == nil {
-			h[headerXForwardedProto] = []string{"http"}
-		} else {
-			h[headerXForwardedProto] = []string{"https"}
-		}
+		h[headerXForwardedProto] = m.protoValue(r.TLS != nil)
 	}
 
 	m.Handler.ServeHTTP(w, r)
@@ -105,12 +132,7 @@ func (m *proxy) distrust(w http.ResponseWriter, r *http.Request) {
 	// mutations of one header to the other within a single request.
 	h[headerXForwardedFor] = []string{remoteIP}
 	h[headerXRealIP] = []string{remoteIP}
-
-	if r.TLS == nil {
-		h[headerXForwardedProto] = []string{"http"}
-	} else {
-		h[headerXForwardedProto] = []string{"https"}
-	}
+	h[headerXForwardedProto] = m.protoValue(r.TLS != nil)
 
 	m.Handler.ServeHTTP(w, r)
 }

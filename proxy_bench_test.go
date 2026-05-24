@@ -56,6 +56,14 @@ func BenchmarkProxyTrustWithHeaders(b *testing.B) {
 	})
 }
 
+// BenchmarkProxyDistrustShared is BenchmarkProxyDistrust with the shared
+// X-Forwarded-Proto slice enabled: the write reuses a global slice, dropping
+// one of the three per-request allocations.
+func BenchmarkProxyDistrustShared(b *testing.B) {
+	p := &proxy{Handler: benchNoopHandler, shareProtoSlice: true}
+	benchProxy(b, p, nil)
+}
+
 type benchProxyRW struct{ h http.Header }
 
 func newBenchProxyRW() *benchProxyRW                  { return &benchProxyRW{h: make(http.Header)} }
