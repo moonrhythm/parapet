@@ -208,6 +208,30 @@ s.Use(w)
 
 See [`pkg/waf/doc.go`](pkg/waf/doc.go) for the full list of `request.*` fields and helper functions exposed to expressions.
 
+## JWT authentication
+
+The [`authn`](pkg/authn) package verifies `Authorization: Bearer` tokens with
+`authn.JWT`. The accepted signature algorithms are **pinned by the caller** — a
+token signed with any other algorithm (including `none`) is rejected, which
+prevents algorithm-confusion attacks. The signature, `exp`/`nbf` (with leeway),
+and optional `iss`/`aud` claims are all verified; verified claims are placed on
+the request context for downstream handlers.
+
+```go
+import (
+	jose "github.com/go-jose/go-jose/v4"
+	"github.com/moonrhythm/parapet/pkg/authn"
+)
+
+m := authn.JWT([]byte(secret), jose.HS256) // []byte for HMAC; a public key for RS*/ES*/EdDSA
+m.Issuer = "https://issuer.example.com"
+m.Audience = "my-api"
+s.Use(m)
+
+// downstream
+claims, ok := authn.JWTClaimsFromContext(r.Context())
+```
+
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.
