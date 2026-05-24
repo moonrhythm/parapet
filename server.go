@@ -20,11 +20,12 @@ import (
 //
 //nolint:govet
 type Server struct {
-	s          http.Server
-	once       sync.Once
-	ms         Middlewares
-	onShutdown []func()
-	modifyConn []func(conn net.Conn) net.Conn
+	s                http.Server
+	once             sync.Once
+	ms               Middlewares
+	onShutdown       []func()
+	modifyConn       []func(conn net.Conn) net.Conn
+	sharedProtoSlice bool
 
 	Addr               string
 	Handler            http.Handler
@@ -62,6 +63,27 @@ func (s *Server) UseFunc(m MiddlewareFunc) {
 	s.Use(m)
 }
 
+// EnableSharedProtoSlice makes the proxy write a single shared []string for the
+// X-Forwarded-Proto header ("http"/"https") instead of allocating a fresh slice
+// on every request, saving one allocation per request that sets the header.
+//
+// This is UNSAFE if any middleware mutates the X-Forwarded-Proto value slice in
+// place — for example headers.MapRequest("X-Forwarded-Proto", …), or any code
+// doing r.Header["X-Forwarded-Proto"][0] = …. Such a write would corrupt the
+// shared slice for every subsequent request across all goroutines. Appending
+// (headers.AddRequest) is safe: the slice has len == cap == 1, so append copies
+// instead of mutating in place.
+//
+// Enable this only if you control the whole middleware chain and are certain
+// X-Forwarded-Proto is never mutated in place. It must be called before the
+// server starts serving; calling it afterwards panics.
+func (s *Server) EnableSharedProtoSlice() {
+	if s.s.Handler != nil {
+		panic("parapet: can not EnableSharedProtoSlice after serve")
+	}
+	s.sharedProtoSlice = true
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.configHandler()
 
@@ -87,8 +109,9 @@ func (s *Server) configHandler() {
 	s.once.Do(func() {
 		h := s.ms.ServeHandler(s.Handler)
 		h = &proxy{
-			Trust:   s.TrustProxy,
-			Handler: h,
+			Trust:           s.TrustProxy,
+			Handler:         h,
+			shareProtoSlice: s.sharedProtoSlice,
 		}
 		s.s.BaseContext = func(l net.Listener) context.Context {
 			ctx := context.Background()

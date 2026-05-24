@@ -212,6 +212,26 @@ See [`pkg/waf/doc.go`](pkg/waf/doc.go) for the full list of `request.*` fields a
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.
 
+## Performance tuning
+
+`Server.EnableSharedProtoSlice()` makes that server's proxy write a single
+shared `[]string` for `X-Forwarded-Proto` instead of allocating a fresh slice
+per request, saving one allocation on every request that sets the header (~16%
+on the distrust path in the proxy benchmarks). It is off by default and scoped
+to the server it is called on.
+
+This is **unsafe if any middleware mutates the `X-Forwarded-Proto` value slice in
+place** — e.g. `headers.MapRequest("X-Forwarded-Proto", …)` or code doing
+`r.Header["X-Forwarded-Proto"][0] = …` — because the mutation would corrupt the
+shared slice for every subsequent request. Appending (`headers.AddRequest`) is
+safe. Enable it only if you control the whole middleware chain, and call it once
+at startup before serving (it panics if called after the server starts):
+
+```go
+s := parapet.NewBackend()
+s.EnableSharedProtoSlice()
+```
+
 ## License
 
 [MIT](LICENSE)
