@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/moonrhythm/parapet/pkg/block"
 )
@@ -74,6 +75,12 @@ func normalizeHost(h string) string {
 			needsLower = true
 		} else if c == ':' {
 			hasColon = true
+		} else if c >= utf8.RuneSelf {
+			// Non-ASCII byte: defer to the Unicode-aware strings.ToLower in
+			// the slow path. A byte scan can't tell whether the rune has a
+			// lowercase form, and the original always called ToLower, so
+			// force the slow path to preserve that behavior.
+			needsLower = true
 		}
 	}
 	trailingDot := h[n-1] == '.'
