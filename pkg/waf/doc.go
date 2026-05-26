@@ -38,6 +38,7 @@
 //	request.proto         string  // "HTTP/1.1", "HTTP/2.0", ...
 //	request.scheme        string  // "http" or "https"
 //	request.remote_ip     string  // best-effort client IP (X-Real-IP -> X-Forwarded-For -> RemoteAddr)
+//	request.country       string  // ISO 3166-1 alpha-2 from WAF.Country (e.g. "TH"); "" if unresolved/unset
 //	request.content_length int
 //	request.headers       map<string, string>  // single value per name (canonicalised, lowercase keys)
 //	request.cookies       map<string, string>

@@ -462,6 +462,47 @@ func TestEmptyRuleset(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rr.Code)
 }
 
+func TestRequestCountry(t *testing.T) {
+	t.Parallel()
+
+	t.Run("blocks by resolved country", func(t *testing.T) {
+		w := waf.New()
+		w.Country = func(_ *http.Request) string { return "CN" }
+		require.NoError(t, w.SetRules([]waf.Rule{{
+			ID: "block-cn", Expression: `request.country == "CN"`, Action: waf.ActionBlock,
+		}}))
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w.ServeHandler(passthroughHandler).ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+	})
+
+	t.Run("resolver value passes through to a non-matching rule", func(t *testing.T) {
+		w := waf.New()
+		w.Country = func(_ *http.Request) string { return "TH" }
+		require.NoError(t, w.SetRules([]waf.Rule{{
+			ID: "block-cn", Expression: `request.country == "CN"`, Action: waf.ActionBlock,
+		}}))
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w.ServeHandler(passthroughHandler).ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("nil resolver leaves request.country empty without a missing-key error", func(t *testing.T) {
+		// `request.country` is always present in the map, so a rule referencing
+		// it evaluates cleanly (no fail-open) and just doesn't match.
+		w := waf.New()
+		require.NoError(t, w.SetRules([]waf.Rule{{
+			ID: "block-cn", Expression: `request.country == "CN"`, Action: waf.ActionBlock,
+		}}))
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w.ServeHandler(passthroughHandler).ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+}
+
 func TestPriorityOrdering(t *testing.T) {
 	t.Parallel()
 

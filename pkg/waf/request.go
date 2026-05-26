@@ -18,7 +18,7 @@ import (
 // The map keys are deliberately snake_case to match common WAF terminology
 // (e.g. ModSecurity variable names) and to leave camelCase free for any
 // future user-defined fields a caller may merge into the map.
-func buildRequestMap(r *http.Request, body string) map[string]any {
+func buildRequestMap(r *http.Request, body, country string) map[string]any {
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
@@ -65,6 +65,7 @@ func buildRequestMap(r *http.Request, body string) map[string]any {
 			"proto":          r.Proto,
 			"scheme":         scheme,
 			"remote_ip":      clientIP(r),
+			"country":        country,
 			"content_length": r.ContentLength,
 			"headers":        headers,
 			"cookies":        cookies,

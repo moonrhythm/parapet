@@ -95,6 +95,14 @@ type WAF struct {
 	// to r.Body so downstream handlers can still read it.
 	InspectBody int64
 
+	// Country resolves the client's ISO 3166-1 alpha-2 country code for a
+	// request, exposed to rules as `request.country` (e.g. for GeoIP filtering:
+	// `request.country == "TH"`). The WAF stays storage-agnostic — the caller
+	// supplies the lookup (a GeoIP database, an edge header, etc.). nil leaves
+	// `request.country` as the empty string; the field is always present in the
+	// map, so a rule referencing it never errors on a missing key.
+	Country func(r *http.Request) string
+
 	// rules is an atomic pointer so SetRules can swap the ruleset
 	// lock-free; the request path performs only a single atomic load.
 	rules atomic.Pointer[ruleset]
@@ -252,7 +260,11 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 			}
 		}
 
-		input := buildRequestMap(r, bodyStr)
+		var country string
+		if w.Country != nil {
+			country = w.Country(r)
+		}
+		input := buildRequestMap(r, bodyStr, country)
 
 		evalTimeout := w.EvalTimeout
 		if evalTimeout <= 0 {
