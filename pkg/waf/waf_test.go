@@ -503,6 +503,60 @@ func TestRequestCountry(t *testing.T) {
 	})
 }
 
+func TestRequestASN(t *testing.T) {
+	t.Parallel()
+
+	t.Run("blocks by resolved ASN", func(t *testing.T) {
+		w := waf.New()
+		w.ASN = func(_ *http.Request) int64 { return 13335 }
+		require.NoError(t, w.SetRules([]waf.Rule{{
+			ID: "block-asn", Expression: `request.asn == 13335`, Action: waf.ActionBlock,
+		}}))
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w.ServeHandler(passthroughHandler).ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+	})
+
+	t.Run("resolver value passes through to a non-matching rule", func(t *testing.T) {
+		w := waf.New()
+		w.ASN = func(_ *http.Request) int64 { return 15169 }
+		require.NoError(t, w.SetRules([]waf.Rule{{
+			ID: "block-asn", Expression: `request.asn == 13335`, Action: waf.ActionBlock,
+		}}))
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w.ServeHandler(passthroughHandler).ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("nil resolver leaves request.asn 0 without a missing-key error", func(t *testing.T) {
+		// `request.asn` is always present in the map (0 when unset), so a rule
+		// referencing it evaluates cleanly (no fail-open) and just doesn't match.
+		w := waf.New()
+		require.NoError(t, w.SetRules([]waf.Rule{{
+			ID: "block-asn", Expression: `request.asn == 13335`, Action: waf.ActionBlock,
+		}}))
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w.ServeHandler(passthroughHandler).ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusOK, rr.Code)
+	})
+
+	t.Run("rule can match the unresolved sentinel explicitly", func(t *testing.T) {
+		// request.asn == 0 is a usable predicate ("block traffic we can't
+		// attribute to an AS"), proving the field is present even when unset.
+		w := waf.New()
+		require.NoError(t, w.SetRules([]waf.Rule{{
+			ID: "block-unknown-asn", Expression: `request.asn == 0`, Action: waf.ActionBlock,
+		}}))
+		rr := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		w.ServeHandler(passthroughHandler).ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusForbidden, rr.Code)
+	})
+}
+
 func TestPriorityOrdering(t *testing.T) {
 	t.Parallel()
 
