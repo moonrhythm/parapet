@@ -103,6 +103,16 @@ type WAF struct {
 	// map, so a rule referencing it never errors on a missing key.
 	Country func(r *http.Request) string
 
+	// ASN resolves the client's autonomous system number for a request,
+	// exposed to rules as `request.asn` (e.g. for ASN filtering:
+	// `request.asn == 13335`). The WAF stays storage-agnostic — the caller
+	// supplies the lookup (an IP-to-ASN database, an edge header, etc.). nil
+	// leaves `request.asn` as 0; the field is always present in the map, so a
+	// rule referencing it never errors on a missing key. The value is an int64
+	// (not uint) so rules compare against plain CEL integer literals; valid
+	// ASNs fit losslessly, and 0 — reserved by RFC 7607 — means unresolved.
+	ASN func(r *http.Request) int64
+
 	// rules is an atomic pointer so SetRules can swap the ruleset
 	// lock-free; the request path performs only a single atomic load.
 	rules atomic.Pointer[ruleset]
@@ -264,7 +274,11 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 		if w.Country != nil {
 			country = w.Country(r)
 		}
-		input := buildRequestMap(r, bodyStr, country)
+		var asn int64
+		if w.ASN != nil {
+			asn = w.ASN(r)
+		}
+		input := buildRequestMap(r, bodyStr, country, asn)
 
 		evalTimeout := w.EvalTimeout
 		if evalTimeout <= 0 {
