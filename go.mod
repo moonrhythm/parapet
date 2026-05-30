@@ -10,6 +10,7 @@ require (
 	github.com/google/brotli/go/cbrotli v0.0.0-20240919160234-350100a5bb9d
 	github.com/google/cel-go v0.28.1
 	github.com/kavu/go_reuseport v1.5.0
+	github.com/klauspost/compress v1.18.5
 	github.com/prometheus/client_golang v1.23.2
 	github.com/stretchr/testify v1.11.1
 	github.com/tomnomnom/linkheader v0.0.0-20250811210735-e5fe3b51442e
