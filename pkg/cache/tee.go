@@ -1,7 +1,6 @@
 package cache
 
 import (
-	"bytes"
 	"net/http"
 	"sort"
 	"time"
@@ -22,11 +21,11 @@ var hopByHop = map[string]struct{}{
 }
 
 // teeWriter wraps the client ResponseWriter on a cache fill (the leader path). It
-// streams the response to the client AND, when cacheable, buffers the body
-// (bounded by the per-object cap). On finish it hands a COMPLETE body to the
-// storage backend iff the body is complete (Content-Length matched, or HEAD),
-// guaranteeing a truncated response is never stored. Because nothing is persisted
-// until finish, an upstream panic before finish leaves no temp/partial state.
+// streams the response to the client AND, when cacheable, to a storage
+// EntryWriter (the disk backend streams to a temp file; memory buffers). On
+// finish it Commits iff the body is complete (Content-Length matched, or HEAD),
+// guaranteeing a truncated response is never stored; otherwise it Aborts. cleanup
+// Aborts on a panic before finish so no temp/partial state is left.
 //
 //nolint:govet
 type teeWriter struct {
@@ -38,9 +37,8 @@ type teeWriter struct {
 
 	wroteHeader bool
 	status      int
-	caching     bool
 
-	buf        bytes.Buffer
+	ew         EntryWriter // nil = not caching this response
 	written    int64
 	contentLen int64
 	hasCL      bool
@@ -66,14 +64,17 @@ func (tw *teeWriter) WriteHeader(code int) {
 		sort.Strings(vary)
 		// Store under the key derived from THIS response's Vary + the request's
 		// values, so a later lookup matches once the Vary map is learned.
-		tw.storeKey = variantHashFor(tw.primaryHex, vary, tw.r.Header)
-		tw.caching = true
-		tw.vary = vary
-		tw.freshUntil = dec.freshUntil
-		tw.metaHeader = sanitizeHeader(h)
-		if cl, ok := contentLength(h); ok {
-			tw.hasCL = true
-			tw.contentLen = cl
+		storeKey := variantHashFor(tw.primaryHex, vary, tw.r.Header)
+		if ew, err := tw.c.storage.Writer(storeKey); err == nil {
+			tw.ew = ew
+			tw.storeKey = storeKey
+			tw.vary = vary
+			tw.freshUntil = dec.freshUntil
+			tw.metaHeader = sanitizeHeader(h)
+			if cl, ok := contentLength(h); ok {
+				tw.hasCL = true
+				tw.contentLen = cl
+			}
 		}
 	}
 	h.Set("X-Cache", "MISS")
@@ -85,47 +86,64 @@ func (tw *teeWriter) Write(p []byte) (int, error) {
 		tw.WriteHeader(http.StatusOK)
 	}
 	n, err := tw.rw.Write(p)
-	if tw.caching {
-		if tw.written+int64(len(p)) > tw.c.maxFileSize {
+	if tw.ew != nil {
+		switch {
+		case tw.written+int64(len(p)) > tw.c.maxFileSize:
 			tw.abort() // oversize -> stop caching; client still gets the full response
-		} else {
-			tw.buf.Write(p)
-			tw.written += int64(len(p))
+		default:
+			if _, werr := tw.ew.Write(p); werr != nil {
+				tw.abort()
+			} else {
+				tw.written += int64(len(p))
+			}
 		}
 	}
 	return n, err
 }
 
-// abort stops caching this response and drops the buffered body.
+// abort stops caching this response and discards the in-progress entry.
 func (tw *teeWriter) abort() {
-	tw.caching = false
-	tw.buf.Reset()
+	if tw.ew != nil {
+		tw.ew.Abort()
+		tw.ew = nil
+	}
 }
 
-// finish stores the entry iff the body is complete; a truncated body (written !=
-// Content-Length) or an abort drops it. Runs after the upstream handler returns
-// (the client already has the full response) and before the caller closes the
-// fill lock, so waiting followers find the committed entry.
+// finish commits the entry iff the body is complete; a truncated body (written !=
+// Content-Length) or an abort discards it. Runs after the upstream handler
+// returns (the client already has the full response) and before the caller
+// closes the fill lock, so waiting followers find the committed entry.
 func (tw *teeWriter) finish() {
-	if !tw.caching {
+	if tw.ew == nil {
 		return
 	}
 	complete := tw.method == http.MethodHead || (tw.hasCL && tw.written == tw.contentLen)
 	if !complete {
+		tw.abort()
 		return
 	}
-	body := append([]byte(nil), tw.buf.Bytes()...)
-	m := Meta{
+	meta := Meta{
 		Status:     tw.status,
 		Header:     tw.metaHeader,
 		PrimaryHex: tw.primaryHex,
 		Vary:       tw.vary,
 		Created:    time.Now().UnixNano(),
 		FreshUntil: tw.freshUntil.UnixNano(),
-		Size:       int64(len(body)),
+		Size:       tw.written,
 	}
-	tw.c.storage.Set(tw.storeKey, m, body)
-	tw.c.setPrimaryVary(tw.primaryHex, tw.vary)
+	if err := tw.ew.Commit(meta); err == nil {
+		tw.c.setPrimaryVary(tw.primaryHex, tw.vary)
+	}
+	tw.ew = nil
+}
+
+// cleanup aborts an uncommitted entry. Deferred on the leader path so a panic in
+// the upstream handler (before finish) doesn't leak the temp file.
+func (tw *teeWriter) cleanup() {
+	if tw.ew != nil {
+		tw.ew.Abort()
+		tw.ew = nil
+	}
 }
 
 // Flush forwards to the underlying writer so streaming responses still flush.

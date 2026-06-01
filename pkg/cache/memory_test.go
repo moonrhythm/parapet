@@ -24,8 +24,8 @@ func TestMemory_DoesNotPersistAcrossInstances(t *testing.T) {
 func TestMemory_LRUEvicts(t *testing.T) {
 	s := NewMemory(100)
 	fresh := time.Now().Add(time.Hour).UnixNano()
-	s.Set("k1", Meta{Status: 200, Header: http.Header{}, FreshUntil: fresh, Size: 60}, make([]byte, 60))
-	s.Set("k2", Meta{Status: 200, Header: http.Header{}, FreshUntil: fresh, Size: 60}, make([]byte, 60)) // 120 > 100 -> evict k1
+	storePut(t, s, "k1", Meta{Status: 200, Header: http.Header{}, FreshUntil: fresh, Size: 60}, make([]byte, 60))
+	storePut(t, s, "k2", Meta{Status: 200, Header: http.Header{}, FreshUntil: fresh, Size: 60}, make([]byte, 60)) // 120 > 100 -> evict k1
 	_, _, ok1 := s.Get("k1")
 	_, _, ok2 := s.Get("k2")
 	assert.False(t, ok1, "least-recently-used k1 evicted")
@@ -35,7 +35,7 @@ func TestMemory_LRUEvicts(t *testing.T) {
 
 func TestMemory_GetSetDelete(t *testing.T) {
 	s := NewMemory(1 << 20)
-	s.Set("k", Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3}, []byte("abc"))
+	storePut(t, s, "k", Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3}, []byte("abc"))
 	m, body, ok := s.Get("k")
 	assert.True(t, ok)
 	assert.Equal(t, 200, m.Status)

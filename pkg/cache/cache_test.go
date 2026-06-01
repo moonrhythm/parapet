@@ -43,6 +43,19 @@ func origin(spec originSpec, calls *int32) http.Handler {
 	})
 }
 
+// storePut writes an entry directly to a Storage backend (Writer + Commit), for
+// tests that seed or rewrite stored state.
+func storePut(t *testing.T, s Storage, key string, m Meta, body []byte) {
+	t.Helper()
+	w, err := s.Writer(key)
+	require.NoError(t, err)
+	if len(body) > 0 {
+		_, err = w.Write(body)
+		require.NoError(t, err)
+	}
+	require.NoError(t, w.Commit(m))
+}
+
 func do(c *Cache, h http.Handler, method, target string, reqHeader http.Header) *httptest.ResponseRecorder {
 	mw := c.ServeHandler(h)
 	req := httptest.NewRequest(method, target, nil)
@@ -219,7 +232,7 @@ func TestCache_ExpiredEntryIsMiss(t *testing.T) {
 		m, body, ok := c.storage.Get(variant)
 		require.True(t, ok)
 		m.FreshUntil = time.Now().Add(-time.Minute).UnixNano()
-		c.storage.Set(variant, m, body)
+		storePut(t, c.storage, variant, m, body)
 		r := do(c, h, "GET", "http://acme.com/exp", nil)
 		assert.Equal(t, "MISS", r.Header().Get("X-Cache"), "expired entry is a miss")
 		assert.EqualValues(t, 2, atomic.LoadInt32(&calls))

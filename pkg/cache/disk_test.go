@@ -2,6 +2,9 @@ package cache
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -39,7 +42,7 @@ func TestDisk_ScanReapsExpired(t *testing.T) {
 	a, err := NewDisk(dir, 1<<20)
 	require.NoError(t, err)
 	const key = "aabbccddeeff00112233445566778899"
-	a.Set(key, Meta{
+	storePut(t, a, key, Meta{
 		Status:     200,
 		Header:     http.Header{},
 		FreshUntil: time.Now().Add(-time.Hour).UnixNano(), // already expired
@@ -55,11 +58,35 @@ func TestDisk_ScanReapsExpired(t *testing.T) {
 	}, time.Second, 10*time.Millisecond, "scan reaps the expired entry")
 }
 
+func TestDisk_PanicDuringFillNoTempLeak(t *testing.T) {
+	dir := t.TempDir()
+	d, err := NewDisk(dir, 1<<20)
+	require.NoError(t, err)
+	c := New(d, Options{MaxFileSize: 1024})
+
+	panicky := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("partial"))
+		panic("boom")
+	})
+	mw := c.ServeHandler(panicky)
+	func() {
+		defer func() { _ = recover() }()
+		mw.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "http://acme.com/boom", nil))
+	}()
+
+	ents, err := os.ReadDir(filepath.Join(dir, "tmp"))
+	require.NoError(t, err)
+	assert.Empty(t, ents, "panic during fill must abort the writer and leave no temp file")
+}
+
 func TestDisk_GetSetDelete(t *testing.T) {
 	d, err := NewDisk(t.TempDir(), 1<<20)
 	require.NoError(t, err)
 	const key = "0011223344556677889900aabbccddee"
-	d.Set(key, Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3}, []byte("abc"))
+	storePut(t, d, key, Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3}, []byte("abc"))
 	m, body, ok := d.Get(key)
 	require.True(t, ok)
 	assert.Equal(t, 200, m.Status)

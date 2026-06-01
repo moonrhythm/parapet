@@ -3,12 +3,18 @@ package cache
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"net"
 	"net/http"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/moonrhythm/parapet"
 )
+
+// Cache is a parapet.Middleware.
+var _ parapet.Middleware = (*Cache)(nil)
 
 // cacheLockTimeout bounds how long a concurrent miss waits for the in-flight fill
 // (the "leader") to populate the cache before fetching on its own.
@@ -133,6 +139,7 @@ func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.H
 
 	defer c.release(variantHex, lock)
 	tw := &teeWriter{rw: w, r: r, c: c, method: r.Method, primaryHex: primaryHex}
+	defer tw.cleanup() // panic-safe: abort an uncommitted entry if finish never ran
 	next.ServeHTTP(tw, r)
 	tw.finish()
 }
@@ -156,9 +163,10 @@ func (c *Cache) release(variantHex string, l *fillLock) {
 }
 
 // primaryHash keys on host + method + scheme + uri (so distinct hosts/schemes/
-// methods never collide). scheme reflects the terminating listener via
-// X-Forwarded-Proto (set by the parapet server), defaulting to the request TLS
-// state.
+// methods never collide). The host is lowercased and port-stripped so
+// "example.com" and "example.com:443" share a key regardless of upstream host
+// normalization. scheme reflects the terminating listener via X-Forwarded-Proto
+// (set by the parapet server), defaulting to the request TLS state.
 func (c *Cache) primaryHash(r *http.Request) string {
 	scheme := r.Header.Get("X-Forwarded-Proto")
 	if scheme == "" {
@@ -168,8 +176,12 @@ func (c *Cache) primaryHash(r *http.Request) string {
 			scheme = "http"
 		}
 	}
+	host := strings.ToLower(r.Host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h // drop :port (SplitHostPort errors when there is none)
+	}
 	uri := r.URL.RequestURI()
-	sum := sha256.Sum256([]byte(strings.ToLower(r.Host) + "\n" + r.Method + "\n" + scheme + "\n" + uri))
+	sum := sha256.Sum256([]byte(host + "\n" + r.Method + "\n" + scheme + "\n" + uri))
 	return hex.EncodeToString(sum[:16])
 }
 

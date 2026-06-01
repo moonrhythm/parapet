@@ -1,6 +1,9 @@
 package cache
 
-import "sync"
+import (
+	"bytes"
+	"sync"
+)
 
 // MemoryStorage is an in-memory cache backend: bodies are held in RAM and lost
 // on restart. Total size is bounded by LRU eviction (the cap passed to NewMemory)
@@ -36,17 +39,10 @@ func (s *MemoryStorage) Get(key string) (Meta, []byte, bool) {
 	return e.meta, e.body, true
 }
 
-// Set stores body+meta under key and evicts least-recently-used entries to stay
-// within the byte cap. The middleware passes a body it no longer mutates.
-func (s *MemoryStorage) Set(key string, meta Meta, body []byte) {
-	s.mu.Lock()
-	s.m[key] = memEntry{meta: meta, body: body}
-	s.mu.Unlock()
-	for _, victim := range s.lru.admit(key, meta.Size) {
-		s.mu.Lock()
-		delete(s.m, victim)
-		s.mu.Unlock()
-	}
+// Writer returns a buffer-backed writer; Commit stores it (bodies are in RAM
+// either way for this backend).
+func (s *MemoryStorage) Writer(key string) (EntryWriter, error) {
+	return &memWriter{s: s, key: key}, nil
 }
 
 // Delete removes the entry under key.
@@ -55,4 +51,36 @@ func (s *MemoryStorage) Delete(key string) {
 	delete(s.m, key)
 	s.mu.Unlock()
 	s.lru.remove(key)
+}
+
+//nolint:govet
+type memWriter struct {
+	s    *MemoryStorage
+	key  string
+	buf  bytes.Buffer
+	done bool
+}
+
+func (w *memWriter) Write(p []byte) (int, error) { return w.buf.Write(p) }
+
+func (w *memWriter) Commit(meta Meta) error {
+	if w.done {
+		return nil
+	}
+	w.done = true
+	body := append([]byte(nil), w.buf.Bytes()...)
+	w.s.mu.Lock()
+	w.s.m[w.key] = memEntry{meta: meta, body: body}
+	w.s.mu.Unlock()
+	for _, victim := range w.s.lru.admit(w.key, meta.Size) {
+		w.s.mu.Lock()
+		delete(w.s.m, victim)
+		w.s.mu.Unlock()
+	}
+	return nil
+}
+
+func (w *memWriter) Abort() {
+	w.done = true
+	w.buf.Reset()
 }
