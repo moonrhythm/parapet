@@ -23,6 +23,12 @@
 // follows RFC 9111 §3.5: a response to a request bearing an Authorization header
 // is cached only when the origin explicitly opts in via public, s-maxage, or
 // must-revalidate.
+//
+// The key is the request's host+method+scheme+uri plus the origin-declared Vary
+// headers; it does not include request headers the origin reflects but doesn't
+// declare in Vary (e.g. X-Forwarded-Host into a Location), so — as with any
+// honor-origin shared cache — such a response can be poisoned. Use Options.Cacheable
+// to exclude untrusted requests or paths from the cache.
 package cache
 
 import (

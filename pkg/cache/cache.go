@@ -43,6 +43,14 @@ type Options struct {
 	// overhead). The callee owns its own concurrency.
 	InvalidatedAfter func(r *http.Request, m Meta) int64
 
+	// Cacheable, when non-nil, is called for each GET/HEAD request; returning false
+	// excludes the request from the cache entirely (served straight from the origin,
+	// untagged), exactly as if it were uncacheable. Use it to restrict caching to
+	// vetted paths, or to refuse requests carrying headers an origin might reflect
+	// into the body without declaring them in Vary (an unkeyed-input poisoning
+	// vector — see the package doc). nil caches everything otherwise cacheable.
+	Cacheable func(r *http.Request) bool
+
 	// MaxFileSize caps a cacheable response's body. A GET response larger than
 	// this (by Content-Length, or mid-stream) is not cached but still served in
 	// full. Defaults to 8 MiB when <= 0.
@@ -64,6 +72,7 @@ type Options struct {
 type Cache struct {
 	storage          Storage
 	invalidatedAfter func(r *http.Request, m Meta) int64
+	cacheable        func(r *http.Request) bool
 	primaryVary      map[string][]string  // primaryHex -> Vary header names learned from a stored response
 	locks            map[string]*fillLock // variantHex -> in-flight fill
 	maxFileSize      int64
@@ -96,6 +105,7 @@ func New(storage Storage, opts Options) *Cache {
 		maxFileSize:      mfs,
 		lockTimeout:      lt,
 		invalidatedAfter: opts.InvalidatedAfter,
+		cacheable:        opts.Cacheable,
 		primaryVary:      map[string][]string{},
 		locks:            map[string]*fillLock{},
 	}
@@ -111,7 +121,7 @@ func (c *Cache) ServeHandler(next http.Handler) http.Handler {
 }
 
 func (c *Cache) serve(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	if !cacheableMethod(r.Method) || isUpgrade(r) {
+	if !cacheableMethod(r.Method) || isUpgrade(r) || (c.cacheable != nil && !c.cacheable(r)) {
 		next.ServeHTTP(w, r) // never cache these; no X-Cache header
 		return
 	}
