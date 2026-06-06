@@ -16,9 +16,10 @@ import (
 // Cache is a parapet.Middleware.
 var _ parapet.Middleware = (*Cache)(nil)
 
-// cacheLockTimeout bounds how long a concurrent miss waits for the in-flight fill
-// (the "leader") to populate the cache before fetching on its own.
-const cacheLockTimeout = 2 * time.Second
+// defaultLockTimeout bounds how long a concurrent miss waits for the in-flight
+// fill (the "leader") to populate the cache before fetching on its own. Used when
+// Options.LockTimeout <= 0.
+const defaultLockTimeout = 2 * time.Second
 
 // defaultMaxFileSize is the per-object cap when Options.MaxFileSize <= 0.
 const defaultMaxFileSize = 8 << 20 // 8 MiB
@@ -45,6 +46,16 @@ type Options struct {
 	// this (by Content-Length, or mid-stream) is not cached but still served in
 	// full. Defaults to 8 MiB when <= 0.
 	MaxFileSize int64
+
+	// LockTimeout bounds how long a concurrent miss (a "follower") waits for the
+	// in-flight leader to populate the cache before giving up and fetching the
+	// origin itself. The leader holds the fill lock for the WHOLE time it streams
+	// the response to its own client and (on the disk backend) fsyncs the committed
+	// entry, so a slow leader client or a saturated disk can hold followers for up
+	// to this long before they fall back to the origin. Raise it to wait through a
+	// slow fill (fewer origin fetches, higher follower latency); lower it to fail
+	// fast (more origin fetches under load). Defaults to 2s when <= 0.
+	LockTimeout time.Duration
 }
 
 // Cache is the HTTP response-cache middleware. It implements parapet.Middleware
@@ -54,6 +65,7 @@ type Options struct {
 type Cache struct {
 	storage          Storage
 	maxFileSize      int64
+	lockTimeout      time.Duration
 	invalidatedAfter func(r *http.Request, m Meta) int64
 
 	pvMu        sync.RWMutex
@@ -76,9 +88,14 @@ func New(storage Storage, opts Options) *Cache {
 	if mfs <= 0 {
 		mfs = defaultMaxFileSize
 	}
+	lt := opts.LockTimeout
+	if lt <= 0 {
+		lt = defaultLockTimeout
+	}
 	return &Cache{
 		storage:          storage,
 		maxFileSize:      mfs,
+		lockTimeout:      lt,
 		invalidatedAfter: opts.InvalidatedAfter,
 		primaryVary:      map[string][]string{},
 		locks:            map[string]*fillLock{},
@@ -153,7 +170,7 @@ func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.H
 		}
 		select {
 		case <-lock.done:
-		case <-time.After(cacheLockTimeout):
+		case <-time.After(c.lockTimeout):
 		}
 		// Leader finished (or we timed out). Re-read: it may have just learned this
 		// primary's Vary, so our key now matches the stored entry IF our varied
