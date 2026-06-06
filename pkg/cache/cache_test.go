@@ -616,3 +616,18 @@ func TestCache_HitCarriesAgeHeader(t *testing.T) {
 		assert.LessOrEqual(t, age, 31)
 	})
 }
+
+func TestCache_XFPCanonicalizedInKey(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024})
+	mk := func(xfp string) string {
+		r := httptest.NewRequest("GET", "http://acme.com/p", nil)
+		if xfp != "" {
+			r.Header.Set("X-Forwarded-Proto", xfp)
+		}
+		return c.primaryHash(r)
+	}
+	assert.Equal(t, mk("https"), mk("HTTPS"), "case-insensitive https collapses")
+	assert.Equal(t, mk(""), mk("evil-1"), "junk XFP falls back to TLS state, like no XFP")
+	assert.Equal(t, mk("evil-1"), mk("evil-2"), "distinct junk values don't fragment the key")
+	assert.NotEqual(t, mk("http"), mk("https"), "legit http vs https still differ")
+}
