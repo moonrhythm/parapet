@@ -179,10 +179,11 @@ func (w *diskWriter) Write(p []byte) (int, error) { return w.f.Write(p) }
 
 // Commit fsyncs the temp body, atomically renames it to <key>.body, then writes
 // <key>.meta LAST (its presence implies a complete body), and admits to the byte
-// cap. NOTE: the fsync runs synchronously on the caller's goroutine — the
-// middleware calls Commit on the request goroutine (after the client already has
-// the full response) and before it releases the fill lock, so a slow fsync holds
-// the connection and briefly blocks waiting followers.
+// cap. It also fsyncs the shard directory after the meta rename so the rename is
+// crash-durable. NOTE: the fsync runs synchronously on the caller's goroutine —
+// the middleware calls Commit on the request goroutine (after the client already
+// has the full response) and before it releases the fill lock, so a slow fsync
+// holds the connection and briefly blocks waiting followers.
 func (w *diskWriter) Commit(meta Meta) error {
 	if w.done {
 		return nil
@@ -214,6 +215,10 @@ func (w *diskWriter) Commit(meta Meta) error {
 	}
 	if err := atomicWriteRename(s.metaPath(w.key), mb, s.tempPath(w.key+".meta")); err != nil {
 		os.Remove(bodyPath) // roll back so a body without meta isn't left
+		return err
+	}
+	if err := fsyncDir(s.shardDir(w.key)); err != nil {
+		s.removeFiles(w.key) // not durable: don't leave a half-committed entry
 		return err
 	}
 	for _, victim := range s.lru.admit(w.key, meta.Size) {
@@ -313,6 +318,20 @@ func reapIfStale(path string, now time.Time) {
 	if now.Sub(fi.ModTime()) >= reapMinAge {
 		os.Remove(path)
 	}
+}
+
+// fsyncDir flushes a directory-entry change (a rename/create) to disk. POSIX does
+// not guarantee a rename durable until the containing directory is fsync'd.
+func fsyncDir(dir string) error {
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // atomicWriteRename writes data to tmpPath (fsync'd) then renames to path.
