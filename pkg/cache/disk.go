@@ -119,6 +119,9 @@ func (s *DiskStorage) Delete(key string) {
 }
 
 func (s *DiskStorage) removeFiles(key string) {
+	if len(key) < minKeyLen {
+		return // guard shardDir(key[:2]) against a malformed key
+	}
 	os.Remove(s.metaPath(key))
 	os.Remove(s.bodyPath(key))
 }

@@ -95,3 +95,10 @@ func TestDisk_GetSetDelete(t *testing.T) {
 	_, _, ok = d.Get(key)
 	assert.False(t, ok)
 }
+
+func TestDisk_RemoveFilesShortKeyNoPanic(t *testing.T) {
+	d, err := NewDisk(t.TempDir(), 1<<20)
+	require.NoError(t, err)
+	assert.NotPanics(t, func() { d.removeFiles("x") })
+	assert.NotPanics(t, func() { d.removeFiles("") })
+}
