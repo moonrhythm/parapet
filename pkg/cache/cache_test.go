@@ -469,3 +469,106 @@ func TestCache_AuthorizationCachedWithExplicitSharedOptIn(t *testing.T) {
 		assert.EqualValues(t, 1, atomic.LoadInt32(&calls))
 	})
 }
+
+// The stored Meta must NOT embed the X-Cache tag: sanitizeHeader snapshots the
+// response headers BEFORE WriteHeader sets X-Cache. A reorder would leak
+// "X-Cache: MISS" into every stored entry (surfacing via Range and any serve path
+// that doesn't re-Set it). Range is the only way to observe the raw stored header.
+func TestCache_StoredMetaExcludesXCache(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{body: []byte("x"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+		require.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/p", nil).Header().Get("X-Cache")) // fill
+
+		n := 0
+		c.storage.Range(func(_ string, m Meta) bool {
+			n++
+			assert.Equal(t, "", m.Header.Get("X-Cache"), "stored Meta must not embed the X-Cache tag")
+			return true
+		})
+		require.Equal(t, 1, n)
+	})
+}
+
+// Hop-by-hop headers must not be stored in, or served from, the shared cache;
+// end-to-end headers must survive.
+func TestCache_HopByHopHeadersStripped(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{
+			body:   []byte("x"),
+			header: hdr("Cache-Control", "max-age=60", "Connection", "keep-alive", "Keep-Alive", "timeout=5", "X-App", "yes"),
+		}, &calls)
+		require.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/hbh", nil).Header().Get("X-Cache")) // fill
+
+		r := do(c, h, "GET", "http://acme.com/hbh", nil) // HIT, served from cache
+		require.Equal(t, "HIT", r.Header().Get("X-Cache"))
+		assert.Equal(t, "", r.Header().Get("Connection"), "hop-by-hop Connection must not be served from cache")
+		assert.Equal(t, "", r.Header().Get("Keep-Alive"), "hop-by-hop Keep-Alive must not be served from cache")
+		assert.Equal(t, "yes", r.Header().Get("X-App"), "end-to-end header preserved")
+
+		c.storage.Range(func(_ string, m Meta) bool {
+			assert.Equal(t, "", m.Header.Get("Connection"), "hop-by-hop must not be stored")
+			assert.Equal(t, "yes", m.Header.Get("X-App"))
+			return true
+		})
+	})
+}
+
+// A body that exceeds MaxFileSize only mid-stream (Content-Length is within the
+// cap, but the origin writes more) is aborted: the full body is still served, but
+// nothing is cached.
+func TestCache_OversizeMidStreamNotCached(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		body := make([]byte, 2000) // exceeds eachBackend's MaxFileSize (1024)
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			w.Header().Set("Cache-Control", "max-age=60")
+			w.Header().Set("Content-Length", "100") // within the cap; we write more
+			w.WriteHeader(200)
+			_, _ = w.Write(body)
+		})
+		r1 := do(c, h, "GET", "http://acme.com/over", nil)
+		assert.Equal(t, "MISS", r1.Header().Get("X-Cache"))
+		assert.Len(t, r1.Body.Bytes(), 2000, "full body still served despite not caching")
+
+		r2 := do(c, h, "GET", "http://acme.com/over", nil)
+		assert.Equal(t, "MISS", r2.Header().Get("X-Cache"), "oversize response is not cached")
+		assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
+	})
+}
+
+// HEAD responses are cached and served with their headers but no body.
+func TestCache_HeadCachedAndServed(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			w.Header().Set("Cache-Control", "max-age=60")
+			w.Header().Set("Content-Length", "42") // reflects the GET length; no body for HEAD
+			w.Header().Set("X-App", "head")
+			w.WriteHeader(200)
+		})
+		assert.Equal(t, "MISS", do(c, h, "HEAD", "http://acme.com/h", nil).Header().Get("X-Cache"))
+		r := do(c, h, "HEAD", "http://acme.com/h", nil)
+		assert.Equal(t, "HIT", r.Header().Get("X-Cache"))
+		assert.Equal(t, "head", r.Header().Get("X-App"))
+		assert.Empty(t, r.Body.Bytes(), "HEAD hit serves no body")
+		assert.EqualValues(t, 1, atomic.LoadInt32(&calls), "HEAD cached after the first fetch")
+	})
+}
+
+// A 204 No Content (bodiless) response is cached and served with no body.
+func TestCache_NoContent204Cached(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{status: http.StatusNoContent, header: hdr("Cache-Control", "max-age=60")}, &calls)
+		assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/nc", nil).Header().Get("X-Cache"))
+		r := do(c, h, "GET", "http://acme.com/nc", nil)
+		assert.Equal(t, "HIT", r.Header().Get("X-Cache"))
+		assert.Equal(t, http.StatusNoContent, r.Code)
+		assert.Empty(t, r.Body.Bytes(), "204 hit serves no body")
+		assert.EqualValues(t, 1, atomic.LoadInt32(&calls))
+	})
+}
