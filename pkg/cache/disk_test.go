@@ -118,3 +118,16 @@ func TestDisk_FsyncDir(t *testing.T) {
 	assert.NoError(t, fsyncDir(dir))
 	assert.Error(t, fsyncDir(filepath.Join(dir, "does-not-exist")))
 }
+
+func TestDisk_ScanSkipsSizeMismatch(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewDisk(dir, 1<<20)
+	require.NoError(t, err)
+	const key = "1122334455667788990011223344aabb"
+	storePut(t, a, key, Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3}, []byte("xyz"))
+	require.NoError(t, os.WriteFile(a.bodyPath(key), []byte("xyzzz"), 0o644)) // body now 5, meta says 3
+
+	b := &DiskStorage{dir: dir, lru: newLRU(1 << 20)}
+	b.scan(time.Now())
+	assert.EqualValues(t, 0, b.lru.size(), "size-mismatched entry is not admitted to the byte cap")
+}
