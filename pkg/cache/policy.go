@@ -43,12 +43,10 @@ func cacheableStatus(code int) bool {
 }
 
 // decision is the outcome of the honor-origin cacheability check.
-//
-//nolint:govet
 type decision struct {
-	cacheable  bool
 	freshUntil time.Time
 	vary       []string // lowercased Vary header names (nil when no Vary)
+	cacheable  bool
 }
 
 // decide applies the honor-origin policy to an origin response. method is the
@@ -128,15 +126,14 @@ func parseVary(h http.Header) (names []string, star bool) {
 	return names, false
 }
 
-//nolint:govet
 type cacheControl struct {
+	maxAge         int64
+	sMaxAge        int64
 	private        bool
 	noStore        bool
 	noCache        bool
 	public         bool
 	mustRevalidate bool
-	maxAge         int64
-	sMaxAge        int64
 	hasMax         bool
 	hasSMax        bool
 }

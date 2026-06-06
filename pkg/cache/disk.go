@@ -32,12 +32,10 @@ const minKeyLen = 2
 //	<dir>/<aa>/<key>.body   response body bytes
 //	<dir>/<aa>/<key>.meta   JSON sidecar (written last)
 //	<dir>/tmp/<key>.<seq>   in-progress writes, atomically renamed on commit
-//
-//nolint:govet
 type DiskStorage struct {
+	lru *lru
 	dir string
 	seq atomic.Uint64
-	lru *lru
 }
 
 // NewDisk creates (or opens) a disk storage rooted at dir, bounded to maxSize
@@ -166,11 +164,10 @@ func (s *DiskStorage) Range(fn func(key string, m Meta) bool) {
 	}
 }
 
-//nolint:govet
 type diskWriter struct {
 	s    *DiskStorage
-	key  string
 	f    *os.File
+	key  string
 	tmp  string
 	done bool
 }
