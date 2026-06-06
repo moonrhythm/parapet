@@ -643,3 +643,15 @@ func TestCache_CacheablePredicate(t *testing.T) {
 	assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/yes", nil).Header().Get("X-Cache"))
 	assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/yes", nil).Header().Get("X-Cache"))
 }
+
+func TestCache_RangeRequestBypassesCache(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{body: []byte("0123456789"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+		assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/r", nil).Header().Get("X-Cache"))
+		assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/r", nil).Header().Get("X-Cache"))
+		r := do(c, h, "GET", "http://acme.com/r", hdr("Range", "bytes=0-3"))
+		assert.Equal(t, "", r.Header().Get("X-Cache"), "Range request bypasses the cache")
+		assert.EqualValues(t, 2, atomic.LoadInt32(&calls), "Range request reaches the origin")
+	})
+}

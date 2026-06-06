@@ -121,7 +121,10 @@ func (c *Cache) ServeHandler(next http.Handler) http.Handler {
 }
 
 func (c *Cache) serve(w http.ResponseWriter, r *http.Request, next http.Handler) {
-	if !cacheableMethod(r.Method) || isUpgrade(r) || (c.cacheable != nil && !c.cacheable(r)) {
+	// Range requests are passed straight through: this cache has no Range support,
+	// so it must not answer a Range request with a stored full 200 (let the origin
+	// serve 206). They are also not used to fill the cache.
+	if !cacheableMethod(r.Method) || isUpgrade(r) || r.Header.Get("Range") != "" || (c.cacheable != nil && !c.cacheable(r)) {
 		next.ServeHTTP(w, r) // never cache these; no X-Cache header
 		return
 	}
