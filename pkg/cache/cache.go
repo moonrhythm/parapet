@@ -31,6 +31,16 @@ const maxPrimaryVary = 1 << 16
 
 // Options configures the cache middleware.
 type Options struct {
+	// InvalidatedAfter, when non-nil, is consulted on every cache hit to support
+	// out-of-band invalidation (cache purge). It receives the request and the
+	// stored entry's Meta and returns an invalidation epoch in unix nanos: a hit
+	// whose Meta.Created is <= the returned epoch is treated as stale (reaped and
+	// served as a miss), exactly like a passed FreshUntil. Return 0 (or any value
+	// below the entry's Created) to keep the entry. It runs only on a hit, so it
+	// costs nothing while the cache is idle; nil disables the check entirely (zero
+	// overhead). The callee owns its own concurrency.
+	InvalidatedAfter func(r *http.Request, m Meta) int64
+
 	// MaxFileSize caps a cacheable response's body. A GET response larger than
 	// this (by Content-Length, or mid-stream) is not cached but still served in
 	// full. Defaults to 8 MiB when <= 0.
@@ -42,8 +52,9 @@ type Options struct {
 //
 //nolint:govet
 type Cache struct {
-	storage     Storage
-	maxFileSize int64
+	storage          Storage
+	maxFileSize      int64
+	invalidatedAfter func(r *http.Request, m Meta) int64
 
 	pvMu        sync.RWMutex
 	primaryVary map[string][]string // primaryHex -> Vary header names learned from a stored response
@@ -66,10 +77,11 @@ func New(storage Storage, opts Options) *Cache {
 		mfs = defaultMaxFileSize
 	}
 	return &Cache{
-		storage:     storage,
-		maxFileSize: mfs,
-		primaryVary: map[string][]string{},
-		locks:       map[string]*fillLock{},
+		storage:          storage,
+		maxFileSize:      mfs,
+		invalidatedAfter: opts.InvalidatedAfter,
+		primaryVary:      map[string][]string{},
+		locks:            map[string]*fillLock{},
 	}
 }
 
@@ -105,6 +117,14 @@ func (c *Cache) tryServeHit(w http.ResponseWriter, r *http.Request, key string) 
 		return false
 	}
 	if time.Now().After(time.Unix(0, m.FreshUntil)) {
+		c.storage.Delete(key)
+		return false
+	}
+	// Out-of-band invalidation (cache purge): an entry created at or before the
+	// invalidation epoch is reaped and served as a miss, just like a passed
+	// FreshUntil. Checked after freshness so the common (no-purge) path is one nil
+	// compare.
+	if c.invalidatedAfter != nil && m.Created <= c.invalidatedAfter(r, m) {
 		c.storage.Delete(key)
 		return false
 	}

@@ -239,6 +239,49 @@ func TestCache_ExpiredEntryIsMiss(t *testing.T) {
 	})
 }
 
+func TestCache_InvalidatedAfterPurgesHit(t *testing.T) {
+	backends := []struct {
+		name string
+		new  func() Storage
+	}{
+		{"memory", func() Storage { return NewMemory(1 << 20) }},
+		{"disk", func() Storage {
+			d, err := NewDisk(t.TempDir(), 1<<20)
+			require.NoError(t, err)
+			return d
+		}},
+	}
+	for _, bk := range backends {
+		t.Run(bk.name, func(t *testing.T) {
+			var epoch atomic.Int64 // invalidation epoch (unix nanos); 0 = nothing purged
+			c := New(bk.new(), Options{
+				MaxFileSize:      1024,
+				InvalidatedAfter: func(_ *http.Request, _ Meta) int64 { return epoch.Load() },
+			})
+			var calls int32
+			h := origin(originSpec{body: []byte("p"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+
+			// epoch 0: the hook is present but purges nothing (Created > 0), so the
+			// entry fills then hits — the no-purge fast path stays a hit.
+			assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/p", nil).Header().Get("X-Cache"))
+			assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/p", nil).Header().Get("X-Cache"))
+			assert.EqualValues(t, 1, atomic.LoadInt32(&calls))
+
+			// Purge: bump the epoch to now. The cached entry was created before this,
+			// so its next lookup is reaped and served as a miss (re-fetch).
+			epoch.Store(time.Now().UnixNano())
+			r := do(c, h, "GET", "http://acme.com/p", nil)
+			assert.Equal(t, "MISS", r.Header().Get("X-Cache"), "entry created at/before the epoch is purged")
+			assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
+
+			// The re-fill was created after the epoch, so it hits again (a purge
+			// invalidates only what existed when it was issued).
+			assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/p", nil).Header().Get("X-Cache"))
+			assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
+		})
+	}
+}
+
 func TestCache_PanicDuringFillIsSafe(t *testing.T) {
 	// Buffering (no temp file) makes a fill panic-safe: nothing is persisted, and
 	// the cache stays usable afterward.
