@@ -100,12 +100,10 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, next http.Handler)
 		return
 	}
 	primaryHex := c.primaryHash(r)
-	variantHex := c.variantHash(primaryHex, r)
-
-	if c.tryServeHit(w, r, variantHex) {
+	if c.tryServeHit(w, r, c.variantHash(primaryHex, r)) {
 		return
 	}
-	c.fillAndServe(w, r, next, primaryHex, variantHex)
+	c.fillAndServe(w, r, next, primaryHex)
 }
 
 // tryServeHit serves key from storage if present and fresh, returning true. An
@@ -132,31 +130,53 @@ func (c *Cache) tryServeHit(w http.ResponseWriter, r *http.Request, key string) 
 	return true
 }
 
-// fillAndServe handles a miss. The first arrival becomes the leader and fills the
-// cache while streaming to its own client; concurrent arrivals wait for the
-// leader (then re-read from cache) or time out and fetch on their own. Each tags
-// X-Cache accurately (HIT when served from the just-filled cache, MISS when it
-// contacted the origin).
-func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex, variantHex string) {
-	lock, leader := c.acquire(variantHex)
-	if !leader {
+// fillAndServe handles a miss with single-flight. The first arrival for a variant
+// becomes the leader and fills the cache while streaming to its own client;
+// concurrent arrivals wait for it (then re-read from cache) or time out and fetch
+// on their own. Each tags X-Cache accurately (HIT when served from the just-filled
+// cache, MISS when it contacted the origin).
+//
+// A primary's Vary is learned lazily, so before the first fill every variant of a
+// URL shares one lock key. A follower whose varied-header values differ from the
+// leader's therefore wakes to a miss; it then re-enters once to lead (or join) the
+// single-flight for ITS OWN variant key — so each variant collapses to a single
+// origin fetch and is cached, instead of every differing follower fetching
+// uncached. The loop runs at most twice: once on the pre-Vary key, once on the
+// learned-Vary key (which is stable thereafter).
+func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex string) {
+	for attempt := 0; attempt < 2; attempt++ {
+		variantHex := c.variantHash(primaryHex, r)
+		lock, leader := c.acquire(variantHex)
+		if leader {
+			c.fill(w, r, next, primaryHex, variantHex, lock)
+			return
+		}
 		select {
 		case <-lock.done:
 		case <-time.After(cacheLockTimeout):
 		}
-		// The leader has finished (or we timed out). Recompute our variant key:
-		// the leader may have just learned this primary's Vary, so our key now
-		// matches the stored entry IF our varied-header values match the leader's
-		// (otherwise we correctly miss and fetch our own variant — never serving a
-		// wrong Vary variant). A miss here falls through to our own origin fetch.
+		// Leader finished (or we timed out). Re-read: it may have just learned this
+		// primary's Vary, so our key now matches the stored entry IF our varied
+		// values match the leader's. A wrong-Vary variant is never served.
 		if c.tryServeHit(w, r, c.variantHash(primaryHex, r)) {
 			return
 		}
-		w.Header().Set("X-Cache", "MISS")
-		next.ServeHTTP(w, r)
-		return
+		// Still a miss. If the leader learned a Vary we differ on, our key changed —
+		// loop to lead/join the fill for our own variant. If the key is unchanged
+		// (the leader didn't cache it, or we timed out before any Vary was learned),
+		// fall through to our own uncached fetch.
+		if c.variantHash(primaryHex, r) == variantHex {
+			break
+		}
 	}
+	w.Header().Set("X-Cache", "MISS")
+	next.ServeHTTP(w, r)
+}
 
+// fill is the leader path: stream the response to the client through a teeWriter
+// that also writes the cacheable body to storage, commit on completion, then
+// release the fill lock so waiting followers find the committed entry.
+func (c *Cache) fill(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex, variantHex string, lock *fillLock) {
 	defer c.release(variantHex, lock)
 	tw := &teeWriter{rw: w, r: r, c: c, method: r.Method, primaryHex: primaryHex}
 	defer tw.cleanup() // panic-safe: abort an uncommitted entry if finish never ran

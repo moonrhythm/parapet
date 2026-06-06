@@ -221,6 +221,51 @@ func TestCache_SingleFlightVaryFirstFill(t *testing.T) {
 	})
 }
 
+// A cold-key stampede spanning multiple Vary variants collapses to one origin
+// fetch PER VARIANT (not one per follower), and every variant is cached. Each
+// requester still receives its own variant's body.
+func TestCache_SingleFlightCollapsesCrossVariant(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			enc := r.Header.Get("Accept-Encoding")
+			time.Sleep(60 * time.Millisecond) // hold the lock so a stampede forms
+			body := []byte("body-" + enc)
+			w.Header().Set("Cache-Control", "max-age=60")
+			w.Header().Set("Vary", "Accept-Encoding")
+			w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+			w.WriteHeader(200)
+			_, _ = w.Write(body)
+		})
+		mw := c.ServeHandler(h)
+
+		var wg, start sync.WaitGroup
+		start.Add(1)
+		for _, enc := range []string{"gzip", "br", "br", "br", "br", "br"} {
+			wg.Add(1)
+			go func(enc string) {
+				defer wg.Done()
+				start.Wait()
+				req := httptest.NewRequest("GET", "http://acme.com/v", nil)
+				req.Header.Set("Accept-Encoding", enc)
+				rec := httptest.NewRecorder()
+				mw.ServeHTTP(rec, req)
+				assert.Equal(t, "body-"+enc, rec.Body.String(), "each variant gets its own body")
+			}(enc)
+		}
+		start.Done()
+		wg.Wait()
+
+		// Two distinct variants (gzip, br) => exactly two origin fetches, regardless
+		// of how many followers each had.
+		assert.EqualValues(t, 2, atomic.LoadInt32(&calls), "one fetch per variant, not per follower")
+		// Both variants ended up cached.
+		assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/v", hdr("Accept-Encoding", "gzip")).Header().Get("X-Cache"))
+		assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/v", hdr("Accept-Encoding", "br")).Header().Get("X-Cache"))
+	})
+}
+
 func TestCache_ExpiredEntryIsMiss(t *testing.T) {
 	eachBackend(t, func(t *testing.T, c *Cache) {
 		var calls int32
