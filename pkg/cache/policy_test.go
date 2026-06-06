@@ -134,10 +134,10 @@ func TestFreshness_SubtractsResponseAge(t *testing.T) {
 // response aged past its lifetime is not cached at all.
 func TestDecide_AgeReducesFreshness(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
-	d := decide(http.MethodGet, 200, hdr("Cache-Control", "max-age=60", "Age", "55", "Content-Length", "1"), maxFile, now)
+	d := decide(http.MethodGet, 200, hdr("Cache-Control", "max-age=60", "Age", "55", "Content-Length", "1"), false, maxFile, now)
 	assert.True(t, d.cacheable)
 	assert.Equal(t, now.Add(5*time.Second), d.freshUntil, "freshUntil reflects the ~5s remaining after Age")
 
-	assert.False(t, decide(http.MethodGet, 200, hdr("Cache-Control", "max-age=60", "Age", "60", "Content-Length", "1"), maxFile, now).cacheable,
+	assert.False(t, decide(http.MethodGet, 200, hdr("Cache-Control", "max-age=60", "Age", "60", "Content-Length", "1"), false, maxFile, now).cacheable,
 		"Age >= max-age: already stale, not cached")
 }
