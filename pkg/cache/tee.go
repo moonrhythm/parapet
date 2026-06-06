@@ -26,26 +26,23 @@ var hopByHop = map[string]struct{}{
 // finish it Commits iff the body is complete (Content-Length matched, or HEAD),
 // guaranteeing a truncated response is never stored; otherwise it Aborts. cleanup
 // Aborts on a panic before finish so no temp/partial state is left.
-//
-//nolint:govet
 type teeWriter struct {
+	freshUntil time.Time
+	ew         EntryWriter // nil = not caching this response
 	rw         http.ResponseWriter
 	r          *http.Request
 	c          *Cache
+	metaHeader http.Header
 	method     string
+	storeKey   string
 	primaryHex string
-
-	wroteHeader bool
-	status      int
-
-	ew         EntryWriter // nil = not caching this response
+	vary       []string // sorted, lowercased
 	written    int64
 	contentLen int64
-	hasCL      bool
-	storeKey   string
-	freshUntil time.Time
-	vary       []string // sorted, lowercased
-	metaHeader http.Header
+	status     int
+
+	wroteHeader bool
+	hasCL       bool
 }
 
 func (tw *teeWriter) Header() http.Header { return tw.rw.Header() }

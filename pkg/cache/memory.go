@@ -12,18 +12,15 @@ import (
 // whole body is buffered in RAM (and retained if the response is cached), so peak
 // transient memory is up to MaxFileSize per concurrent miss, independent of the
 // byte cap.
-//
-//nolint:govet
 type MemoryStorage struct {
-	mu  sync.RWMutex
 	m   map[string]memEntry
 	lru *lru
+	mu  sync.RWMutex
 }
 
-//nolint:govet
 type memEntry struct {
-	meta Meta
 	body []byte
+	meta Meta
 }
 
 // NewMemory creates an in-memory storage bounded to maxSize total body bytes.
@@ -101,7 +98,6 @@ func (s *MemoryStorage) Range(fn func(key string, m Meta) bool) {
 	}
 }
 
-//nolint:govet
 type memWriter struct {
 	s    *MemoryStorage
 	key  string

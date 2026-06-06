@@ -9,14 +9,12 @@ import (
 // tracks keys and their byte weights; the owning Storage holds the actual data
 // and deletes a key's data when lru returns it as a victim. Both the memory and
 // disk backends embed an lru.
-//
-//nolint:govet
 type lru struct {
-	mu    sync.Mutex
-	max   int64
-	cur   int64
 	ll    *list.List               // front = most recently used
 	items map[string]*list.Element // key -> element holding *lruItem
+	max   int64
+	cur   int64
+	mu    sync.Mutex
 }
 
 type lruItem struct {

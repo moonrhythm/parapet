@@ -84,10 +84,7 @@ type EntryWriter interface {
 
 // Meta is the stored metadata for a cached response. Backends persist it
 // alongside the body (the disk backend marshals it to JSON).
-//
-//nolint:govet
 type Meta struct {
-	Status     int         `json:"status"`
 	Header     http.Header `json:"header"`
 	PrimaryHex string      `json:"primary"`        // primary key hash (host+method+scheme+uri)
 	Host       string      `json:"host,omitempty"` // normalized host (lowercased, port-stripped); for out-of-band Range maintenance
@@ -96,4 +93,5 @@ type Meta struct {
 	Created    int64       `json:"created"`        // unix nanos
 	FreshUntil int64       `json:"fresh"`          // unix nanos; entry is stale after this
 	Size       int64       `json:"size"`           // body bytes (== eviction weight)
+	Status     int         `json:"status"`
 }

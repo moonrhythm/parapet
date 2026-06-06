@@ -60,19 +60,17 @@ type Options struct {
 
 // Cache is the HTTP response-cache middleware. It implements parapet.Middleware
 // (ServeHandler). Construct with New, giving it a Storage backend.
-//
-//nolint:govet
 type Cache struct {
 	storage          Storage
+	invalidatedAfter func(r *http.Request, m Meta) int64
+	primaryVary      map[string][]string  // primaryHex -> Vary header names learned from a stored response
+	locks            map[string]*fillLock // variantHex -> in-flight fill
 	maxFileSize      int64
 	lockTimeout      time.Duration
-	invalidatedAfter func(r *http.Request, m Meta) int64
 
-	pvMu        sync.RWMutex
-	primaryVary map[string][]string // primaryHex -> Vary header names learned from a stored response
+	pvMu sync.RWMutex
 
 	lockMu sync.Mutex
-	locks  map[string]*fillLock // variantHex -> in-flight fill
 }
 
 // fillLock coordinates concurrent misses for one variant: the leader fills, the
