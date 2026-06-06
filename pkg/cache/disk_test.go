@@ -102,3 +102,9 @@ func TestDisk_RemoveFilesShortKeyNoPanic(t *testing.T) {
 	assert.NotPanics(t, func() { d.removeFiles("x") })
 	assert.NotPanics(t, func() { d.removeFiles("") })
 }
+
+func TestDisk_FsyncDir(t *testing.T) {
+	dir := t.TempDir()
+	assert.NoError(t, fsyncDir(dir))
+	assert.Error(t, fsyncDir(filepath.Join(dir, "does-not-exist")))
+}
