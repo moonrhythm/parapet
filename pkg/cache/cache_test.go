@@ -266,6 +266,34 @@ func TestCache_SingleFlightCollapsesCrossVariant(t *testing.T) {
 	})
 }
 
+// A short Options.LockTimeout makes followers give up on a slow leader and fetch
+// the origin themselves rather than wait (the default 2s would collapse them).
+func TestCache_LockTimeoutConfigurable(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024, LockTimeout: 20 * time.Millisecond})
+	var calls int32
+	h := origin(originSpec{body: []byte("slow"), header: hdr("Cache-Control", "max-age=60"), sleep: 200 * time.Millisecond}, &calls)
+	mw := c.ServeHandler(h)
+
+	const n = 4
+	var wg, start sync.WaitGroup
+	start.Add(1)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			start.Wait()
+			rec := httptest.NewRecorder()
+			mw.ServeHTTP(rec, httptest.NewRequest("GET", "http://acme.com/s", nil))
+			assert.Equal(t, "slow", rec.Body.String())
+		}()
+	}
+	start.Done()
+	wg.Wait()
+	// The leader's 200ms fill far exceeds the 20ms timeout, so followers don't wait
+	// for it — they each contact the origin.
+	assert.Greater(t, atomic.LoadInt32(&calls), int32(1), "short LockTimeout: followers fetch the origin instead of waiting")
+}
+
 func TestCache_ExpiredEntryIsMiss(t *testing.T) {
 	eachBackend(t, func(t *testing.T, c *Cache) {
 		var calls int32
