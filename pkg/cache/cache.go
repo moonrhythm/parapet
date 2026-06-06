@@ -31,11 +31,6 @@ const maxPrimaryVary = 1 << 16
 
 // Options configures the cache middleware.
 type Options struct {
-	// MaxFileSize caps a cacheable response's body. A GET response larger than
-	// this (by Content-Length, or mid-stream) is not cached but still served in
-	// full. Defaults to 8 MiB when <= 0.
-	MaxFileSize int64
-
 	// InvalidatedAfter, when non-nil, is consulted on every cache hit to support
 	// out-of-band invalidation (cache purge). It receives the request and the
 	// stored entry's Meta and returns an invalidation epoch in unix nanos: a hit
@@ -45,6 +40,11 @@ type Options struct {
 	// costs nothing while the cache is idle; nil disables the check entirely (zero
 	// overhead). The callee owns its own concurrency.
 	InvalidatedAfter func(r *http.Request, m Meta) int64
+
+	// MaxFileSize caps a cacheable response's body. A GET response larger than
+	// this (by Content-Length, or mid-stream) is not cached but still served in
+	// full. Defaults to 8 MiB when <= 0.
+	MaxFileSize int64
 }
 
 // Cache is the HTTP response-cache middleware. It implements parapet.Middleware
