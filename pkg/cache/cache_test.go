@@ -631,3 +631,15 @@ func TestCache_XFPCanonicalizedInKey(t *testing.T) {
 	assert.Equal(t, mk("evil-1"), mk("evil-2"), "distinct junk values don't fragment the key")
 	assert.NotEqual(t, mk("http"), mk("https"), "legit http vs https still differ")
 }
+
+func TestCache_CacheablePredicate(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024, Cacheable: func(r *http.Request) bool {
+		return r.URL.Path != "/no"
+	}})
+	var calls int32
+	h := origin(originSpec{body: []byte("x"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+	assert.Equal(t, "", do(c, h, "GET", "http://acme.com/no", nil).Header().Get("X-Cache"))
+	assert.Equal(t, "", do(c, h, "GET", "http://acme.com/no", nil).Header().Get("X-Cache"))
+	assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/yes", nil).Header().Get("X-Cache"))
+	assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/yes", nil).Header().Get("X-Cache"))
+}
