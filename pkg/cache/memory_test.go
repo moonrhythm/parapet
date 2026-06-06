@@ -81,3 +81,16 @@ func TestMemory_RangeMetaMutationDoesNotCorrupt(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "", m.Header.Get("X-Injected"), "Range fn mutation must not poison the cached entry")
 }
+
+func TestMemory_AbortAfterCommitIsNoop(t *testing.T) {
+	s := NewMemory(1 << 20)
+	w, err := s.Writer("k")
+	require.NoError(t, err)
+	_, err = w.Write([]byte("abc"))
+	require.NoError(t, err)
+	require.NoError(t, w.Commit(Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3}))
+	w.Abort() // must be a no-op
+	_, body, ok := s.Get("k")
+	require.True(t, ok)
+	assert.Equal(t, "abc", string(body))
+}
