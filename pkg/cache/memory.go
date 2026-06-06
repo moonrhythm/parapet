@@ -2,6 +2,7 @@ package cache
 
 import (
 	"bytes"
+	"net/http"
 	"sync"
 )
 
@@ -27,7 +28,10 @@ func NewMemory(maxSize int64) *MemoryStorage {
 	return &MemoryStorage{m: map[string]memEntry{}, lru: newLRU(maxSize)}
 }
 
-// Get returns the entry under key, touching its LRU recency on a hit.
+// Get returns the entry under key, touching its LRU recency on a hit. The Meta is
+// deep-copied so a caller (e.g. the InvalidatedAfter hook) can't mutate the live
+// stored entry; the body is returned by reference and must not be mutated (see
+// Storage). This matches the disk backend, which returns a fresh Meta per call.
 func (s *MemoryStorage) Get(key string) (Meta, []byte, bool) {
 	s.mu.RLock()
 	e, ok := s.m[key]
@@ -36,7 +40,25 @@ func (s *MemoryStorage) Get(key string) (Meta, []byte, bool) {
 		return Meta{}, nil, false
 	}
 	s.lru.touch(key)
-	return e.meta, e.body, true
+	return cloneMeta(e.meta), e.body, true
+}
+
+// cloneMeta returns m with its Header map and Vary slice deep-copied, so a caller
+// can't mutate (or data-race) the live stored entry's metadata. The body is not
+// copied (it is large and read-only by contract). The disk backend gets this for
+// free by unmarshaling a fresh Meta per call.
+func cloneMeta(m Meta) Meta {
+	if m.Header != nil {
+		h := make(http.Header, len(m.Header))
+		for k, vs := range m.Header {
+			h[k] = append([]string(nil), vs...)
+		}
+		m.Header = h
+	}
+	if m.Vary != nil {
+		m.Vary = append([]string(nil), m.Vary...)
+	}
+	return m
 }
 
 // Writer returns a buffer-backed writer; Commit stores it (bodies are in RAM
@@ -55,7 +77,9 @@ func (s *MemoryStorage) Delete(key string) {
 
 // Range snapshots the current (key, Meta) pairs under the read lock, then calls fn
 // for each WITHOUT holding the lock — so fn may Delete entries (which takes the
-// write lock) without deadlocking. The snapshot copies only metadata, not bodies.
+// write lock) without deadlocking. The snapshot deep-copies each Meta (header map
+// and Vary slice included), so a fn that mutates the Meta it receives can neither
+// corrupt the live cached entry nor data-race concurrent serving of it.
 func (s *MemoryStorage) Range(fn func(key string, m Meta) bool) {
 	s.mu.RLock()
 	type kv struct {
@@ -64,7 +88,7 @@ func (s *MemoryStorage) Range(fn func(key string, m Meta) bool) {
 	}
 	snap := make([]kv, 0, len(s.m))
 	for k, e := range s.m {
-		snap = append(snap, kv{k, e.meta})
+		snap = append(snap, kv{k, cloneMeta(e.meta)})
 	}
 	s.mu.RUnlock()
 	for _, e := range snap {

@@ -41,8 +41,10 @@ import (
 // missed, so within one Cache the store never sees a same-key Get racing a Set.
 type Storage interface {
 	// Get returns the entry stored under key, or ok=false on a miss. A hit should
-	// be counted as a recent use (LRU). The returned body must not be mutated by
-	// the caller. Any internal error is reported as a miss (fail-static).
+	// be counted as a recent use (LRU). The returned Meta (including its Header map
+	// and Vary slice) must be independent of stored state — safe for the caller to
+	// read or modify without affecting the cache; the returned body must not be
+	// mutated. Any internal error is reported as a miss (fail-static).
 	Get(key string) (meta Meta, body []byte, ok bool)
 
 	// Writer begins storing an entry under key. The caller streams the body to the
@@ -60,9 +62,10 @@ type Storage interface {
 	// reaper that physically deletes entries matching an external predicate — not
 	// the serving path. Iteration order is unspecified, and the snapshot is
 	// best-effort: fn may observe an entry that is concurrently deleted, and an
-	// entry written during the walk may or may not be visited. fn MAY call
-	// Delete(key) on this storage (a backend must not hold a lock across fn that
-	// Delete would need). fn MUST NOT call Writer.
+	// entry written during the walk may or may not be visited. The Meta passed to
+	// fn is independent of stored state (see Get), so fn may freely read or modify
+	// it. fn MAY call Delete(key) on this storage (a backend must not hold a lock
+	// across fn that Delete would need). fn MUST NOT call Writer.
 	Range(fn func(key string, m Meta) bool)
 }
 
