@@ -282,6 +282,69 @@ func TestCache_InvalidatedAfterPurgesHit(t *testing.T) {
 	}
 }
 
+func TestStorage_RangeVisitsEntriesAndAllowsDelete(t *testing.T) {
+	backends := []struct {
+		name string
+		new  func() Storage
+	}{
+		{"memory", func() Storage { return NewMemory(1 << 20) }},
+		{"disk", func() Storage {
+			d, err := NewDisk(t.TempDir(), 1<<20)
+			require.NoError(t, err)
+			return d
+		}},
+	}
+	for _, bk := range backends {
+		t.Run(bk.name, func(t *testing.T) {
+			s := bk.new()
+			fresh := time.Now().Add(time.Hour).UnixNano()
+			for _, k := range []string{"aa01", "bb02", "cc03"} {
+				storePut(t, s, k, Meta{PrimaryHex: k, Host: "acme.com", URI: "/" + k, Created: 1, FreshUntil: fresh, Size: 3}, []byte("xyz"))
+			}
+
+			// Range sees all three and exposes Meta; delete one from inside fn.
+			seen := map[string]Meta{}
+			s.Range(func(key string, m Meta) bool {
+				seen[key] = m
+				if key == "bb02" {
+					s.Delete(key)
+				}
+				return true
+			})
+			assert.Len(t, seen, 3)
+			assert.Equal(t, "acme.com", seen["aa01"].Host)
+			assert.Equal(t, "/aa01", seen["aa01"].URI)
+
+			_, _, ok := s.Get("bb02")
+			assert.False(t, ok, "deleted from within Range")
+			cnt := 0
+			s.Range(func(string, Meta) bool { cnt++; return true })
+			assert.Equal(t, 2, cnt)
+
+			// Early stop: returning false halts iteration.
+			visited := 0
+			s.Range(func(string, Meta) bool { visited++; return false })
+			assert.Equal(t, 1, visited)
+		})
+	}
+}
+
+func TestCache_MetaCarriesHostURIForRange(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{body: []byte("x"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+		do(c, h, "GET", "http://Acme.COM:8443/p?q=1", nil) // fill (mixed case + port)
+
+		got := map[string]Meta{}
+		c.storage.Range(func(k string, m Meta) bool { got[k] = m; return true })
+		require.Len(t, got, 1)
+		for _, m := range got {
+			assert.Equal(t, "acme.com", m.Host, "host normalized (lowercased, port-stripped) for Range maintenance")
+			assert.Equal(t, "/p?q=1", m.URI)
+		}
+	})
+}
+
 func TestCache_PanicDuringFillIsSafe(t *testing.T) {
 	// Buffering (no temp file) makes a fill panic-safe: nothing is persisted, and
 	// the cache stays usable afterward.

@@ -196,13 +196,21 @@ func (c *Cache) primaryHash(r *http.Request) string {
 			scheme = "http"
 		}
 	}
-	host := strings.ToLower(r.Host)
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h // drop :port (SplitHostPort errors when there is none)
-	}
+	host := normalizeHost(r.Host)
 	uri := r.URL.RequestURI()
 	sum := sha256.Sum256([]byte(host + "\n" + r.Method + "\n" + scheme + "\n" + uri))
 	return hex.EncodeToString(sum[:16])
+}
+
+// normalizeHost lowercases a host and strips any port, matching the form used in
+// the primary key. It is also stamped into Meta.Host so out-of-band Range
+// maintenance can key on the same value.
+func normalizeHost(host string) string {
+	host = strings.ToLower(host)
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h // drop :port (SplitHostPort errors when there is none)
+	}
+	return host
 }
 
 // variantHash mixes the primary hash with the request's values for the Vary
