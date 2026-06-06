@@ -129,6 +129,9 @@ func (w *memWriter) Commit(meta Meta) error {
 }
 
 func (w *memWriter) Abort() {
+	if w.done {
+		return // matches diskWriter: Abort after Commit/Abort is a no-op
+	}
 	w.done = true
 	w.buf.Reset()
 }
