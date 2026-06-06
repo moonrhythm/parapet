@@ -51,6 +51,16 @@ type Storage interface {
 
 	// Delete removes the entry under key (e.g. when the middleware finds it stale).
 	Delete(key string)
+
+	// Range calls fn for each currently-stored entry (key + its Meta), stopping
+	// early if fn returns false. It is for out-of-band maintenance — e.g. a purge
+	// reaper that physically deletes entries matching an external predicate — not
+	// the serving path. Iteration order is unspecified, and the snapshot is
+	// best-effort: fn may observe an entry that is concurrently deleted, and an
+	// entry written during the walk may or may not be visited. fn MAY call
+	// Delete(key) on this storage (a backend must not hold a lock across fn that
+	// Delete would need). fn MUST NOT call Writer.
+	Range(fn func(key string, m Meta) bool)
 }
 
 // EntryWriter streams one cached body and finalizes it. Exactly one of Commit or
@@ -73,9 +83,11 @@ type EntryWriter interface {
 type Meta struct {
 	Status     int         `json:"status"`
 	Header     http.Header `json:"header"`
-	PrimaryHex string      `json:"primary"` // primary key hash (host+method+scheme+uri)
-	Vary       []string    `json:"vary"`    // lowercased Vary header names
-	Created    int64       `json:"created"` // unix nanos
-	FreshUntil int64       `json:"fresh"`   // unix nanos; entry is stale after this
-	Size       int64       `json:"size"`    // body bytes (== eviction weight)
+	PrimaryHex string      `json:"primary"`        // primary key hash (host+method+scheme+uri)
+	Host       string      `json:"host,omitempty"` // normalized host (lowercased, port-stripped); for out-of-band Range maintenance
+	URI        string      `json:"uri,omitempty"`  // request-uri (path+query); for out-of-band Range maintenance
+	Vary       []string    `json:"vary"`           // lowercased Vary header names
+	Created    int64       `json:"created"`        // unix nanos
+	FreshUntil int64       `json:"fresh"`          // unix nanos; entry is stale after this
+	Size       int64       `json:"size"`           // body bytes (== eviction weight)
 }

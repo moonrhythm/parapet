@@ -126,6 +126,8 @@ func (tw *teeWriter) finish() {
 		Status:     tw.status,
 		Header:     tw.metaHeader,
 		PrimaryHex: tw.primaryHex,
+		Host:       normalizeHost(tw.r.Host),
+		URI:        tw.r.URL.RequestURI(),
 		Vary:       tw.vary,
 		Created:    time.Now().UnixNano(),
 		FreshUntil: tw.freshUntil.UnixNano(),

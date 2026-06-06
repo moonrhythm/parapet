@@ -123,6 +123,46 @@ func (s *DiskStorage) removeFiles(key string) {
 	os.Remove(s.bodyPath(key))
 }
 
+// Range walks the shard dirs reading each entry's .meta sidecar and calls fn(key,
+// Meta), stopping early if fn returns false. It holds no lock, so fn may Delete the
+// entry it is visiting (the keys come from a directory snapshot taken before fn
+// runs). Unreadable/corrupt sidecars are skipped. For maintenance only, off the
+// serving path.
+func (s *DiskStorage) Range(fn func(key string, m Meta) bool) {
+	shards, err := os.ReadDir(s.dir)
+	if err != nil {
+		return
+	}
+	for _, sh := range shards {
+		if !sh.IsDir() || sh.Name() == "tmp" {
+			continue
+		}
+		shardPath := filepath.Join(s.dir, sh.Name())
+		ents, err := os.ReadDir(shardPath)
+		if err != nil {
+			continue
+		}
+		for _, e := range ents {
+			name := e.Name()
+			if !strings.HasSuffix(name, ".meta") {
+				continue
+			}
+			key := strings.TrimSuffix(name, ".meta")
+			mb, err := os.ReadFile(filepath.Join(shardPath, name))
+			if err != nil {
+				continue
+			}
+			var m Meta
+			if err := json.Unmarshal(mb, &m); err != nil {
+				continue
+			}
+			if !fn(key, m) {
+				return
+			}
+		}
+	}
+}
+
 //nolint:govet
 type diskWriter struct {
 	s    *DiskStorage

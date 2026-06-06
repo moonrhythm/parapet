@@ -53,6 +53,27 @@ func (s *MemoryStorage) Delete(key string) {
 	s.lru.remove(key)
 }
 
+// Range snapshots the current (key, Meta) pairs under the read lock, then calls fn
+// for each WITHOUT holding the lock — so fn may Delete entries (which takes the
+// write lock) without deadlocking. The snapshot copies only metadata, not bodies.
+func (s *MemoryStorage) Range(fn func(key string, m Meta) bool) {
+	s.mu.RLock()
+	type kv struct {
+		key string
+		m   Meta
+	}
+	snap := make([]kv, 0, len(s.m))
+	for k, e := range s.m {
+		snap = append(snap, kv{k, e.meta})
+	}
+	s.mu.RUnlock()
+	for _, e := range snap {
+		if !fn(e.key, e.m) {
+			return
+		}
+	}
+}
+
 //nolint:govet
 type memWriter struct {
 	s    *MemoryStorage
