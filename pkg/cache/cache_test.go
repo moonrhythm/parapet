@@ -366,3 +366,33 @@ func TestCache_PanicDuringFillIsSafe(t *testing.T) {
 		assert.Equal(t, "MISS", do(c, ok, "GET", "http://acme.com/after", nil).Header().Get("X-Cache"))
 	})
 }
+
+// A response to an Authorization-bearing request must not be served to other
+// users from a shared cache unless the origin explicitly opted in (RFC 9111 §3.5).
+func TestCache_AuthorizationNotSharedAcrossUsers(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		// Bare max-age (no public/s-maxage/must-revalidate) on an authenticated request.
+		h := origin(originSpec{body: []byte("user-A-private"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+
+		// User A (authenticated): not shared-cacheable, so nothing is stored.
+		rA := do(c, h, "GET", "http://acme.com/account", hdr("Authorization", "Bearer tokenA"))
+		assert.Equal(t, "MISS", rA.Header().Get("X-Cache"))
+
+		// User B (no credentials) must not receive A's body from the cache.
+		rB := do(c, h, "GET", "http://acme.com/account", nil)
+		assert.Equal(t, "MISS", rB.Header().Get("X-Cache"), "authorized response must not be shared with other users")
+		assert.EqualValues(t, 2, atomic.LoadInt32(&calls), "each request reaches the origin; A's response is never shared")
+	})
+}
+
+// public opt-in makes an authorized response shared-cacheable (RFC 9111 §3.5).
+func TestCache_AuthorizationCachedWithExplicitSharedOptIn(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{body: []byte("shared"), header: hdr("Cache-Control", "public, max-age=60")}, &calls)
+		assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/pub", hdr("Authorization", "Bearer t")).Header().Get("X-Cache"))
+		assert.Equal(t, "HIT", do(c, h, "GET", "http://acme.com/pub", nil).Header().Get("X-Cache"))
+		assert.EqualValues(t, 1, atomic.LoadInt32(&calls))
+	})
+}
