@@ -115,3 +115,29 @@ func TestFreshness_SMaxAgeWins(t *testing.T) {
 	cc := parseCacheControl(hdr("Cache-Control", "max-age=10, s-maxage=99"))
 	assert.Equal(t, 99*time.Second, freshness(cc, http.Header{}, time.Now()))
 }
+
+// The remaining lifetime is reduced by the response's age (RFC 9111 §4.2.3): the
+// larger of the Age header and the apparent age (now - Date).
+func TestFreshness_SubtractsResponseAge(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	cc := parseCacheControl(hdr("Cache-Control", "max-age=60"))
+	date50 := now.Add(-50 * time.Second).UTC().Format(http.TimeFormat)
+
+	assert.Equal(t, 60*time.Second, freshness(cc, http.Header{}, now), "no Age/Date: full lifetime")
+	assert.Equal(t, 5*time.Second, freshness(cc, hdr("Age", "55"), now), "Age header subtracted")
+	assert.Equal(t, 10*time.Second, freshness(cc, hdr("Date", date50), now), "apparent age (now-Date) subtracted")
+	assert.Equal(t, 5*time.Second, freshness(cc, hdr("Age", "55", "Date", date50), now), "larger of Age and apparent age wins")
+	assert.LessOrEqual(t, freshness(cc, hdr("Age", "120"), now), time.Duration(0), "age beyond lifetime: not fresh")
+}
+
+// An already-aged response stays cacheable only for its remaining lifetime, and a
+// response aged past its lifetime is not cached at all.
+func TestDecide_AgeReducesFreshness(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	d := decide(http.MethodGet, 200, hdr("Cache-Control", "max-age=60", "Age", "55", "Content-Length", "1"), maxFile, now)
+	assert.True(t, d.cacheable)
+	assert.Equal(t, now.Add(5*time.Second), d.freshUntil, "freshUntil reflects the ~5s remaining after Age")
+
+	assert.False(t, decide(http.MethodGet, 200, hdr("Cache-Control", "max-age=60", "Age", "60", "Content-Length", "1"), maxFile, now).cacheable,
+		"Age >= max-age: already stale, not cached")
+}

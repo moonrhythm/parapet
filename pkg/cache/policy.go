@@ -181,30 +181,71 @@ func parseCacheControl(h http.Header) cacheControl {
 	return cc
 }
 
-// freshness returns the cacheable lifetime: s-maxage wins (shared-cache
-// directive), then max-age, then Expires (relative to Date if present, else
-// now). Returns 0 (not fresh) when the origin gave no explicit freshness.
+// freshness returns the remaining cacheable lifetime from now: the origin's
+// declared freshness lifetime minus the age the response already had when it was
+// received. Accounting for that age (RFC 9111 §4.2.3) keeps the cache from
+// over-serving a response that was already aged upstream — e.g. max-age=60 on a
+// response carrying Age: 55 is fresh for ~5s, not a full 60s. Returns <= 0
+// (treated as not cacheable) when the origin gave no explicit freshness or the
+// response is already stale on arrival.
 func freshness(cc cacheControl, h http.Header, now time.Time) time.Duration {
+	lifetime := freshnessLifetime(cc, h, now)
+	if lifetime <= 0 {
+		return lifetime // no explicit freshness, or already-expired
+	}
+	return lifetime - responseAge(h, now)
+}
+
+// freshnessLifetime returns the origin's declared freshness lifetime: s-maxage
+// wins (shared-cache directive), then max-age, then Expires (relative to Date if
+// present, else now). Returns 0 when the origin gave no explicit freshness.
+func freshnessLifetime(cc cacheControl, h http.Header, now time.Time) time.Duration {
 	if cc.hasSMax {
 		return time.Duration(cc.sMaxAge) * time.Second
 	}
 	if cc.hasMax {
 		return time.Duration(cc.maxAge) * time.Second
 	}
-	if exp := h.Get("Expires"); exp != "" {
-		expTime, err := http.ParseTime(exp)
-		if err != nil {
-			return 0 // an unparseable Expires (e.g. "0") means already-expired
+	exp := h.Get("Expires")
+	if exp == "" {
+		return 0
+	}
+	expTime, err := http.ParseTime(exp)
+	if err != nil {
+		return 0 // an unparseable Expires (e.g. "0") means already-expired
+	}
+	ref := now
+	if d := h.Get("Date"); d != "" {
+		if dt, derr := http.ParseTime(d); derr == nil {
+			ref = dt
 		}
-		ref := now
-		if d := h.Get("Date"); d != "" {
-			if dt, derr := http.ParseTime(d); derr == nil {
-				ref = dt
+	}
+	return expTime.Sub(ref)
+}
+
+// responseAge estimates how old the response already was when received: the larger
+// of the Age header value and the apparent age (now - Date). Per RFC 9111 §4.2.3
+// this is the corrected initial age at receipt; resident time afterwards is
+// tracked by the stored FreshUntil clock. Never negative.
+func responseAge(h http.Header, now time.Time) time.Duration {
+	var apparent time.Duration
+	if d := h.Get("Date"); d != "" {
+		if dt, err := http.ParseTime(d); err == nil {
+			if a := now.Sub(dt); a > apparent {
+				apparent = a
 			}
 		}
-		return expTime.Sub(ref)
 	}
-	return 0
+	var ageVal time.Duration
+	if v := h.Get("Age"); v != "" {
+		if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && n > 0 {
+			ageVal = time.Duration(n) * time.Second
+		}
+	}
+	if ageVal > apparent {
+		return ageVal
+	}
+	return apparent
 }
 
 // contentLength parses the Content-Length header.
