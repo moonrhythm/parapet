@@ -221,21 +221,31 @@ func (c *Cache) release(variantHex string, l *fillLock) {
 // primaryHash keys on host + method + scheme + uri (so distinct hosts/schemes/
 // methods never collide). The host is lowercased and port-stripped so
 // "example.com" and "example.com:443" share a key regardless of upstream host
-// normalization. scheme reflects the terminating listener via X-Forwarded-Proto
-// (set by the parapet server), defaulting to the request TLS state.
+// normalization. scheme is canonicalized to http/https by schemeOf.
 func (c *Cache) primaryHash(r *http.Request) string {
-	scheme := r.Header.Get("X-Forwarded-Proto")
-	if scheme == "" {
-		if r.TLS != nil {
-			scheme = "https"
-		} else {
-			scheme = "http"
-		}
-	}
+	scheme := schemeOf(r)
 	host := normalizeHost(r.Host)
 	uri := r.URL.RequestURI()
 	sum := sha256.Sum256([]byte(host + "\n" + r.Method + "\n" + scheme + "\n" + uri))
 	return hex.EncodeToString(sum[:16])
+}
+
+// schemeOf returns the request scheme for the cache key, canonicalized to exactly
+// "http" or "https". X-Forwarded-Proto is honored only when it is exactly http or
+// https (case-insensitive); any other value — including attacker-supplied junk
+// meant to fragment the key — falls back to the TLS state. Mount the cache behind
+// a proxy that sets X-Forwarded-Proto from a trusted source.
+func schemeOf(r *http.Request) string {
+	switch {
+	case strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https"):
+		return "https"
+	case strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "http"):
+		return "http"
+	case r.TLS != nil:
+		return "https"
+	default:
+		return "http"
+	}
 }
 
 // normalizeHost lowercases a host and strips any port, matching the form used in
