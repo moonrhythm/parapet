@@ -18,8 +18,11 @@
 //	m := cache.New(store, cache.Options{MaxFileSize: 8 << 20})
 //	srv.Use(m) // mount it ahead of the upstream/handler it should cache
 //
-// Only origin-opted-in (public, fresh) content is cached, so per-user or
-// authorization-sensitive responses must be marked uncacheable by the origin.
+// Only origin-opted-in (public, fresh) content is cached, so per-user responses
+// must be marked uncacheable by the origin. As a shared cache it additionally
+// follows RFC 9111 §3.5: a response to a request bearing an Authorization header
+// is cached only when the origin explicitly opts in via public, s-maxage, or
+// must-revalidate.
 package cache
 
 import (

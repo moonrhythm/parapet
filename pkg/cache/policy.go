@@ -52,7 +52,8 @@ type decision struct {
 }
 
 // decide applies the honor-origin policy to an origin response. method is the
-// request method; status/h are the response status + headers; maxFileSize caps a
+// request method; status/h are the response status + headers; reqAuthorized
+// reports whether the request carried an Authorization header; maxFileSize caps a
 // GET's Content-Length; now is the reference time for freshness. Returns
 // cacheable=false unless the origin explicitly opted in with freshness and the
 // response isn't refused for any reason.
@@ -61,7 +62,7 @@ type decision struct {
 // commits a body only once written bytes == Content-Length, guaranteeing a
 // truncated response is never stored. A chunked (no Content-Length) GET passes
 // through uncached. HEAD has no body and is unaffected.
-func decide(method string, status int, h http.Header, maxFileSize int64, now time.Time) decision {
+func decide(method string, status int, h http.Header, reqAuthorized bool, maxFileSize int64, now time.Time) decision {
 	no := decision{}
 	if !cacheableStatus(status) {
 		return no
@@ -76,6 +77,15 @@ func decide(method string, status int, h http.Header, maxFileSize int64, now tim
 	}
 	cc := parseCacheControl(h)
 	if cc.private || cc.noStore || cc.noCache {
+		return no
+	}
+	// RFC 9111 §3.5: a shared cache MUST NOT store/reuse a response to an
+	// Authorization-bearing request unless the response explicitly opts in via
+	// public, s-maxage, or must-revalidate. The honor-origin policy otherwise keys
+	// without Authorization, so without this gate a bare max-age response to an
+	// authenticated request would be served to other users — a cross-user leak.
+	sharedOptIn := cc.public || cc.hasSMax || cc.mustRevalidate
+	if reqAuthorized && !sharedOptIn {
 		return no
 	}
 	ttl := freshness(cc, h, now)
@@ -120,13 +130,15 @@ func parseVary(h http.Header) (names []string, star bool) {
 
 //nolint:govet
 type cacheControl struct {
-	private bool
-	noStore bool
-	noCache bool
-	maxAge  int64
-	sMaxAge int64
-	hasMax  bool
-	hasSMax bool
+	private        bool
+	noStore        bool
+	noCache        bool
+	public         bool
+	mustRevalidate bool
+	maxAge         int64
+	sMaxAge        int64
+	hasMax         bool
+	hasSMax        bool
 }
 
 // parseCacheControl parses the response Cache-Control directives the policy
@@ -149,6 +161,10 @@ func parseCacheControl(h http.Header) cacheControl {
 				cc.noStore = true
 			case "no-cache":
 				cc.noCache = true
+			case "public":
+				cc.public = true
+			case "must-revalidate":
+				cc.mustRevalidate = true
 			case "max-age":
 				if n, err := strconv.ParseInt(val, 10, 64); err == nil {
 					cc.maxAge = n
