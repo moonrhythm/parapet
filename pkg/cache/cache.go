@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -303,10 +304,23 @@ func writeStored(w http.ResponseWriter, r *http.Request, m Meta, body []byte, ta
 	for k, vs := range m.Header {
 		h[k] = append([]string(nil), vs...)
 	}
+	h.Set("Age", strconv.FormatInt(servedAgeSeconds(m, time.Now()), 10))
 	h.Set("X-Cache", tag)
 	w.WriteHeader(m.Status)
 	if r.Method == http.MethodHead || m.Status == http.StatusNoContent {
 		return
 	}
 	_, _ = w.Write(body)
+}
+
+// servedAgeSeconds is the Age header value for a cache hit: the age the response
+// already had when it was stored (RFC 9111 §4.2.3, reusing responseAge) plus how
+// long it has since resided in the cache. Never negative.
+func servedAgeSeconds(m Meta, now time.Time) int64 {
+	created := time.Unix(0, m.Created)
+	age := responseAge(m.Header, created) + now.Sub(created)
+	if age < 0 {
+		age = 0
+	}
+	return int64(age / time.Second)
 }

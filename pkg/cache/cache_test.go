@@ -596,3 +596,23 @@ func TestCache_ObjectLargerThanCapNotCached(t *testing.T) {
 	assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/big", nil).Header().Get("X-Cache"), "object larger than the storage cap is not cached")
 	assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
 }
+
+func TestCache_HitCarriesAgeHeader(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		req := httptest.NewRequest("GET", "http://acme.com/age", nil)
+		primary := c.primaryHash(req)
+		key := c.variantHash(primary, req)
+		storePut(t, c.storage, key, Meta{
+			Status: 200, Header: http.Header{}, PrimaryHex: primary,
+			Created:    time.Now().Add(-30 * time.Second).UnixNano(),
+			FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3,
+		}, []byte("abc"))
+
+		r := do(c, http.NotFoundHandler(), "GET", "http://acme.com/age", nil)
+		require.Equal(t, "HIT", r.Header().Get("X-Cache"))
+		age, err := strconv.Atoi(r.Header().Get("Age"))
+		require.NoError(t, err)
+		assert.GreaterOrEqual(t, age, 30)
+		assert.LessOrEqual(t, age, 31)
+	})
+}
