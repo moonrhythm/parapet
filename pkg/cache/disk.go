@@ -295,6 +295,14 @@ func (s *DiskStorage) scan(now time.Time) {
 				reapIfStale(filepath.Join(shardPath, key+".body"), now)
 				continue
 			}
+			bp := filepath.Join(shardPath, key+".body")
+			if fi, err := os.Stat(bp); err != nil || fi.Size() != m.Size {
+				// Body length disagrees with meta (torn/truncated). Get would reject it,
+				// so don't admit it as permanent dead weight; reap (age-gated).
+				reapIfStale(mp, now)
+				reapIfStale(bp, now)
+				continue
+			}
 			for _, victim := range s.lru.admit(key, m.Size) {
 				s.removeFiles(victim)
 			}
