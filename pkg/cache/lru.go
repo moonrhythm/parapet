@@ -30,10 +30,24 @@ func newLRU(max int64) *lru {
 
 // admit inserts or updates key with size and returns the keys evicted to stay
 // within the cap (most-recently-used kept). The caller deletes the evicted
-// entries' data.
+// entries' data. An object larger than the whole cap is refused outright (returned
+// as its own victim) so the byte bound is never exceeded.
 func (l *lru) admit(key string, size int64) []string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+
+	if size > l.max {
+		// Can never fit; refuse it (and drop any prior in-cap version). The
+		// per-object cap normally prevents this — it guards a misconfiguration where
+		// MaxFileSize exceeds the storage cap.
+		if el, ok := l.items[key]; ok {
+			it := el.Value.(*lruItem)
+			l.ll.Remove(el)
+			delete(l.items, key)
+			l.cur -= it.size
+		}
+		return []string{key}
+	}
 
 	if el, ok := l.items[key]; ok {
 		it := el.Value.(*lruItem)
@@ -52,12 +66,6 @@ func (l *lru) admit(key string, size int64) []string {
 			break
 		}
 		it := back.Value.(*lruItem)
-		if it.key == key {
-			// Never evict the entry we just admitted to satisfy its own admission
-			// (a single object larger than the cap); the per-object cap prevents
-			// this in practice. Stop to avoid an infinite loop.
-			break
-		}
 		l.ll.Remove(back)
 		delete(l.items, it.key)
 		l.cur -= it.size

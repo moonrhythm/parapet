@@ -587,3 +587,12 @@ func TestCache_PrimaryVaryBoundedEviction(t *testing.T) {
 	assert.Equal(t, 3, n, "map stays at the cap (one evicted), not wiped")
 	assert.True(t, hasE, "the most recent entry is retained")
 }
+
+func TestCache_ObjectLargerThanCapNotCached(t *testing.T) {
+	c := New(NewMemory(500), Options{MaxFileSize: 1 << 20}) // per-object cap > storage cap
+	var calls int32
+	h := origin(originSpec{body: make([]byte, 800), header: hdr("Cache-Control", "max-age=60")}, &calls)
+	assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/big", nil).Header().Get("X-Cache"))
+	assert.Equal(t, "MISS", do(c, h, "GET", "http://acme.com/big", nil).Header().Get("X-Cache"), "object larger than the storage cap is not cached")
+	assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
+}

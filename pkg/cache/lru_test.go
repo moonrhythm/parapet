@@ -38,3 +38,12 @@ func TestLRU_Remove(t *testing.T) {
 	assert.EqualValues(t, 0, l.size())
 	l.remove("missing")
 }
+
+func TestLRU_RejectsOverCap(t *testing.T) {
+	l := newLRU(100)
+	assert.Equal(t, []string{"big"}, l.admit("big", 5000))
+	assert.EqualValues(t, 0, l.size())
+	l.admit("k", 40)
+	assert.Equal(t, []string{"k"}, l.admit("k", 5000), "prior in-cap version dropped when updated over-cap")
+	assert.EqualValues(t, 0, l.size())
+}
