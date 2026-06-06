@@ -286,8 +286,11 @@ func (s *DiskStorage) scan(now time.Time) {
 				continue
 			}
 			if now.After(time.Unix(0, m.FreshUntil)) {
-				os.Remove(mp) // expired
-				os.Remove(filepath.Join(shardPath, key+".body"))
+				// Age-gated like the other reap paths so a concurrent in-flight commit
+				// (mtime ~now) is never destroyed; a genuinely expired-on-disk entry is
+				// older than reapMinAge, and any expired entry is reaped on access too.
+				reapIfStale(mp, now)
+				reapIfStale(filepath.Join(shardPath, key+".body"), now)
 				continue
 			}
 			for _, victim := range s.lru.admit(key, m.Size) {

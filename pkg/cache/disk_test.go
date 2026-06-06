@@ -42,20 +42,30 @@ func TestDisk_ScanReapsExpired(t *testing.T) {
 	a, err := NewDisk(dir, 1<<20)
 	require.NoError(t, err)
 	const key = "aabbccddeeff00112233445566778899"
-	storePut(t, a, key, Meta{
-		Status:     200,
-		Header:     http.Header{},
-		FreshUntil: time.Now().Add(-time.Hour).UnixNano(), // already expired
-		Size:       3,
-	}, []byte("xyz"))
+	storePut(t, a, key, Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(-time.Hour).UnixNano(), Size: 3}, []byte("xyz"))
+	// Age the files so the age-gated reap treats them as not-in-flight.
+	old := time.Now().Add(-2 * reapMinAge)
+	require.NoError(t, os.Chtimes(a.metaPath(key), old, old))
+	require.NoError(t, os.Chtimes(a.bodyPath(key), old, old))
 
-	// A new storage scans on startup and reaps the expired entry.
-	b, err := NewDisk(dir, 1<<20)
+	b := &DiskStorage{dir: dir, lru: newLRU(1 << 20)}
+	b.scan(time.Now())
+	_, _, ok := b.Get(key)
+	assert.False(t, ok, "scan reaps the aged, expired entry")
+}
+
+func TestDisk_ScanSparesRecentlyWrittenExpired(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewDisk(dir, 1<<20)
 	require.NoError(t, err)
-	assert.Eventually(t, func() bool {
-		_, _, ok := b.Get(key)
-		return !ok
-	}, time.Second, 10*time.Millisecond, "scan reaps the expired entry")
+	const key = "ffeeddccbbaa00112233445566778899"
+	// Expired but just written (fresh mtime): a commit racing the startup scan.
+	storePut(t, a, key, Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(-time.Hour).UnixNano(), Size: 3}, []byte("xyz"))
+
+	b := &DiskStorage{dir: dir, lru: newLRU(1 << 20)}
+	b.scan(time.Now())
+	_, _, ok := b.Get(key)
+	assert.True(t, ok, "a recently-written expired entry is spared (reaped on access instead)")
 }
 
 func TestDisk_PanicDuringFillNoTempLeak(t *testing.T) {
