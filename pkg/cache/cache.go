@@ -28,7 +28,7 @@ const defaultMaxFileSize = 8 << 20 // 8 MiB
 // can't grow it without limit (the storage backend bounds bytes, not this map).
 // When the cap is hit the map is reset; a dropped entry just costs one re-learn
 // (the next fill re-records its Vary), so correctness is unaffected.
-const maxPrimaryVary = 1 << 16
+var maxPrimaryVary = 1 << 16
 
 // Options configures the cache middleware.
 type Options struct {
@@ -286,10 +286,12 @@ func (c *Cache) setPrimaryVary(primaryHex string, names []string) {
 	sorted := append([]string(nil), names...)
 	sort.Strings(sorted)
 	c.pvMu.Lock()
-	// Bound the map: a dropped entry just re-learns on the next fill.
-	if len(c.primaryVary) >= maxPrimaryVary {
-		if _, exists := c.primaryVary[primaryHex]; !exists {
-			c.primaryVary = make(map[string][]string, maxPrimaryVary)
+	// Bound the map by evicting one arbitrary entry when full — an O(1) re-learn,
+	// rather than wiping the whole map (which would re-fill every varied URL at once).
+	if _, exists := c.primaryVary[primaryHex]; !exists && len(c.primaryVary) >= maxPrimaryVary {
+		for k := range c.primaryVary {
+			delete(c.primaryVary, k)
+			break
 		}
 	}
 	c.primaryVary[primaryHex] = sorted

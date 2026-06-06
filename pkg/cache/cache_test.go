@@ -572,3 +572,18 @@ func TestCache_NoContent204Cached(t *testing.T) {
 		assert.EqualValues(t, 1, atomic.LoadInt32(&calls))
 	})
 }
+
+func TestCache_PrimaryVaryBoundedEviction(t *testing.T) {
+	defer func(orig int) { maxPrimaryVary = orig }(maxPrimaryVary)
+	maxPrimaryVary = 3
+	c := New(NewMemory(1<<20), Options{})
+	for _, k := range []string{"a", "b", "c", "d", "e"} {
+		c.setPrimaryVary(k, []string{"accept-encoding"})
+	}
+	c.pvMu.RLock()
+	n := len(c.primaryVary)
+	_, hasE := c.primaryVary["e"]
+	c.pvMu.RUnlock()
+	assert.Equal(t, 3, n, "map stays at the cap (one evicted), not wiped")
+	assert.True(t, hasE, "the most recent entry is retained")
+}
