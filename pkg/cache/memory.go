@@ -8,7 +8,10 @@ import (
 
 // MemoryStorage is an in-memory cache backend: bodies are held in RAM and lost
 // on restart. Total size is bounded by LRU eviction (the cap passed to NewMemory)
-// plus the middleware's per-object cap. Safe for concurrent use.
+// plus the middleware's per-object cap. Safe for concurrent use. During a fill the
+// whole body is buffered in RAM (and retained if the response is cached), so peak
+// transient memory is up to MaxFileSize per concurrent miss, independent of the
+// byte cap.
 //
 //nolint:govet
 type MemoryStorage struct {
@@ -113,7 +116,7 @@ func (w *memWriter) Commit(meta Meta) error {
 		return nil
 	}
 	w.done = true
-	body := append([]byte(nil), w.buf.Bytes()...)
+	body := bytes.Clone(w.buf.Bytes())
 	w.s.mu.Lock()
 	w.s.m[w.key] = memEntry{meta: meta, body: body}
 	w.s.mu.Unlock()
