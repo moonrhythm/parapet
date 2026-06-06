@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -653,5 +654,222 @@ func TestCache_RangeRequestBypassesCache(t *testing.T) {
 		r := do(c, h, "GET", "http://acme.com/r", hdr("Range", "bytes=0-3"))
 		assert.Equal(t, "", r.Header().Get("X-Cache"), "Range request bypasses the cache")
 		assert.EqualValues(t, 2, atomic.LoadInt32(&calls), "Range request reaches the origin")
+	})
+}
+
+// eachBackendDecoupled runs fn against both backends with DecoupleFill enabled.
+func eachBackendDecoupled(t *testing.T, fn func(t *testing.T, c *Cache)) {
+	t.Helper()
+	t.Run("memory", func(t *testing.T) {
+		fn(t, New(NewMemory(1<<20), Options{MaxFileSize: 1024, DecoupleFill: true}))
+	})
+	t.Run("disk", func(t *testing.T) {
+		d, err := NewDisk(t.TempDir(), 1<<20)
+		require.NoError(t, err)
+		fn(t, New(d, Options{MaxFileSize: 1024, DecoupleFill: true}))
+	})
+}
+
+// blockingRW is a ResponseWriter whose first body Write blocks until release is
+// closed (simulating a slow client). It signals entry to that Write by closing
+// written. Header/WriteHeader never block.
+type blockingRW struct {
+	hdr     http.Header
+	release chan struct{}
+	written chan struct{}
+	body    bytes.Buffer
+	status  int
+	once    sync.Once
+}
+
+func (b *blockingRW) Header() http.Header {
+	if b.hdr == nil {
+		b.hdr = http.Header{}
+	}
+	return b.hdr
+}
+func (b *blockingRW) WriteHeader(code int) { b.status = code }
+func (b *blockingRW) Write(p []byte) (int, error) {
+	b.once.Do(func() { close(b.written) })
+	<-b.release
+	return b.body.Write(p)
+}
+
+// failingWriterStorage wraps a Storage so its EntryWriter.Write always errors,
+// simulating a mid-fill storage failure.
+type failingWriterStorage struct{ Storage }
+
+func (s failingWriterStorage) Writer(key string) (EntryWriter, error) {
+	w, err := s.Storage.Writer(key)
+	if err != nil {
+		return nil, err
+	}
+	return failingWriter{w}, nil
+}
+
+type failingWriter struct{ EntryWriter }
+
+func (failingWriter) Write([]byte) (int, error) { return 0, assert.AnError }
+
+func TestCache_DecoupleFill_MissThenHit(t *testing.T) {
+	eachBackendDecoupled(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{body: []byte("hello"), header: hdr("Cache-Control", "max-age=60", "X-App", "v")}, &calls)
+		r1 := do(c, h, "GET", "http://acme.com/a", nil)
+		assert.Equal(t, "MISS", r1.Header().Get("X-Cache"), "leader served from the committed entry")
+		assert.Equal(t, "hello", r1.Body.String())
+		assert.Equal(t, "v", r1.Header().Get("X-App"), "leader gets the cached response headers")
+		r2 := do(c, h, "GET", "http://acme.com/a", nil)
+		assert.Equal(t, "HIT", r2.Header().Get("X-Cache"))
+		assert.Equal(t, "hello", r2.Body.String())
+		assert.EqualValues(t, 1, atomic.LoadInt32(&calls), "origin contacted once")
+	})
+}
+
+// The headline property: a leader whose own client is blocked must NOT hold the
+// fill lock — followers hit the just-committed entry immediately.
+func TestCache_DecoupleFill_SlowLeaderDoesNotBlockFollowers(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1 << 20, DecoupleFill: true})
+	var calls int32
+	h := origin(originSpec{body: []byte("payload"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+	mw := c.ServeHandler(h)
+
+	leaderRW := &blockingRW{release: make(chan struct{}), written: make(chan struct{})}
+	leaderDone := make(chan struct{})
+	go func() {
+		mw.ServeHTTP(leaderRW, httptest.NewRequest("GET", "http://acme.com/x", nil))
+		close(leaderDone)
+	}()
+
+	// Wait until the leader has committed + released and is blocked writing to its client.
+	select {
+	case <-leaderRW.written:
+	case <-time.After(2 * time.Second):
+		t.Fatal("leader never reached its client write")
+	}
+
+	// While the leader's client is blocked, followers get an immediate HIT.
+	for i := 0; i < 5; i++ {
+		rec := do(c, h, "GET", "http://acme.com/x", nil)
+		assert.Equal(t, "HIT", rec.Header().Get("X-Cache"), "follower hits while the leader's client is blocked")
+		assert.Equal(t, "payload", rec.Body.String())
+	}
+	assert.EqualValues(t, 1, atomic.LoadInt32(&calls), "origin contacted once despite the slow leader client")
+
+	close(leaderRW.release)
+	<-leaderDone
+	assert.Equal(t, "payload", leaderRW.body.String())
+	assert.Equal(t, "MISS", leaderRW.hdr.Get("X-Cache"))
+}
+
+func TestCache_DecoupleFill_HeadAndNoContent(t *testing.T) {
+	eachBackendDecoupled(t, func(t *testing.T, c *Cache) {
+		var hcalls int32
+		hh := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&hcalls, 1)
+			w.Header().Set("Cache-Control", "max-age=60")
+			w.Header().Set("Content-Length", "5")
+			w.WriteHeader(200)
+		})
+		assert.Equal(t, "MISS", do(c, hh, "HEAD", "http://acme.com/h", nil).Header().Get("X-Cache"))
+		rh := do(c, hh, "HEAD", "http://acme.com/h", nil)
+		assert.Equal(t, "HIT", rh.Header().Get("X-Cache"))
+		assert.Empty(t, rh.Body.Bytes(), "HEAD serves no body")
+		assert.EqualValues(t, 1, atomic.LoadInt32(&hcalls))
+
+		var ncalls int32
+		h204 := origin(originSpec{status: http.StatusNoContent, header: hdr("Cache-Control", "max-age=60")}, &ncalls)
+		assert.Equal(t, "MISS", do(c, h204, "GET", "http://acme.com/n", nil).Header().Get("X-Cache"))
+		r2 := do(c, h204, "GET", "http://acme.com/n", nil)
+		assert.Equal(t, "HIT", r2.Header().Get("X-Cache"))
+		assert.Equal(t, http.StatusNoContent, r2.Code)
+		assert.Empty(t, r2.Body.Bytes())
+	})
+}
+
+// A non-cacheable response is unaffected by DecoupleFill: it still streams to the
+// client (in lockstep).
+func TestCache_DecoupleFill_NonCacheableStreams(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024, DecoupleFill: true})
+	var calls int32
+	h := origin(originSpec{body: []byte("dynamic")}, &calls) // no freshness
+	r := do(c, h, "GET", "http://acme.com/d", nil)
+	assert.Equal(t, "MISS", r.Header().Get("X-Cache"))
+	assert.Equal(t, "dynamic", r.Body.String(), "non-cacheable response streams to the client")
+}
+
+// A truncated cacheable response (origin under-writes Content-Length) is not cached;
+// the decoupled leader is served the headers with no body (a clean failure rather
+// than a torn partial).
+func TestCache_DecoupleFill_TruncatedNotCached(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1 << 20, DecoupleFill: true})
+	var calls int32
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Length", "100") // claims 100...
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("short")) // ...writes 5
+	})
+	r1 := do(c, h, "GET", "http://acme.com/t", nil)
+	assert.Equal(t, "MISS", r1.Header().Get("X-Cache"))
+	assert.Equal(t, "short", r1.Body.String(), "leader gets the bytes the origin actually wrote (as in lockstep)")
+	r2 := do(c, h, "GET", "http://acme.com/t", nil)
+	assert.Equal(t, "MISS", r2.Header().Get("X-Cache"), "truncated response is not cached")
+	assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
+}
+
+// The decoupled leader's own response has hop-by-hop headers stripped and no Age
+// header (the body is served from the buffer, not via the HIT path).
+func TestCache_DecoupleFill_LeaderHeadersSanitized(t *testing.T) {
+	eachBackendDecoupled(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := origin(originSpec{
+			body:   []byte("ok"),
+			header: hdr("Cache-Control", "max-age=60", "Connection", "keep-alive", "X-App", "yes"),
+		}, &calls)
+		r := do(c, h, "GET", "http://acme.com/s", nil)
+		assert.Equal(t, "MISS", r.Header().Get("X-Cache"))
+		assert.Equal(t, "ok", r.Body.String())
+		assert.Equal(t, "yes", r.Header().Get("X-App"), "end-to-end header kept")
+		assert.Equal(t, "", r.Header().Get("Connection"), "hop-by-hop stripped from the decoupled leader")
+		assert.Equal(t, "", r.Header().Get("Age"), "a MISS carries no Age header")
+	})
+}
+
+// A mid-fill storage write failure must still deliver the full body to the leader
+// (it's buffered independently of storage); the response is just not cached.
+func TestCache_DecoupleFill_StorageWriteErrorStillServesBody(t *testing.T) {
+	c := New(failingWriterStorage{NewMemory(1 << 20)}, Options{MaxFileSize: 1 << 20, DecoupleFill: true})
+	var calls int32
+	h := origin(originSpec{body: []byte("payload"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+	r := do(c, h, "GET", "http://acme.com/e", nil)
+	assert.Equal(t, "MISS", r.Header().Get("X-Cache"))
+	assert.Equal(t, "payload", r.Body.String(), "leader gets the full body despite the storage write error")
+}
+
+// A handler that Flushes mid-response during a decoupled fill must not prematurely
+// commit the client: the flush is ignored and the full body is still served+cached.
+func TestCache_DecoupleFill_FlushDuringFillIgnored(t *testing.T) {
+	eachBackendDecoupled(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			w.Header().Set("Cache-Control", "max-age=60")
+			w.Header().Set("Content-Length", "6")
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("abc"))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush() // must be a no-op while buffering
+			}
+			_, _ = w.Write([]byte("def"))
+		})
+		r1 := do(c, h, "GET", "http://acme.com/f", nil)
+		assert.Equal(t, "MISS", r1.Header().Get("X-Cache"))
+		assert.Equal(t, "abcdef", r1.Body.String(), "full body served despite the mid-fill flush")
+		r2 := do(c, h, "GET", "http://acme.com/f", nil)
+		assert.Equal(t, "HIT", r2.Header().Get("X-Cache"))
+		assert.Equal(t, "abcdef", r2.Body.String())
+		assert.EqualValues(t, 1, atomic.LoadInt32(&calls))
 	})
 }
