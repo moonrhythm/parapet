@@ -41,6 +41,7 @@ Each subdirectory under `pkg/` is a self-contained middleware:
 | [`block`](pkg/block) | Conditional middleware container — match a request, then apply an inner chain |
 | [`ratelimit`](pkg/ratelimit) | Fixed-window, concurrent, and leaky-bucket limiters |
 | [`compress`](pkg/compress) | Content-negotiated compression (Gzip, Brotli, Deflate) |
+| [`cache`](pkg/cache) | HTTP response cache — honor-origin policy, in-memory or disk backend, single-flight fills, `X-Cache` tag |
 | [`body`](pkg/body) | Request body limiting and buffering |
 | [`headers`](pkg/headers) | Request/response header manipulation |
 | [`cors`](pkg/cors) | CORS handling |
@@ -230,6 +231,29 @@ s.Use(m)
 // downstream
 claims, ok := authn.JWTClaimsFromContext(r.Context())
 ```
+
+## Response caching
+
+The [`cache`](pkg/cache) package is a CDN-style, honor-origin response cache. It caches a response **only** when the origin opts in with explicit freshness (`Cache-Control: s-maxage`/`max-age` or `Expires`); refuses `private`/`no-store`/`no-cache`, `Set-Cookie`, and `Vary: *`; honors `Vary`; serves `GET`/`HEAD` only; and ignores the client's request `Cache-Control` so a client can't bust the shared cache. Concurrent misses for one key collapse into a single origin fetch (single-flight), and it's fail-static — any storage error degrades to a miss, never an error to the client. Every response is tagged `X-Cache: HIT|MISS`.
+
+Two storage backends ship: an in-memory one (lost on restart) and a disk-backed one (survives restarts, streams bodies to disk). Both bound their total size with LRU eviction plus a per-object cap. Mount it ahead of the upstream/handler whose responses it should cache.
+
+```go
+import "github.com/moonrhythm/parapet/pkg/cache"
+
+// Disk-backed, 1 GiB on disk, 8 MiB per object; or cache.NewMemory(size) for RAM.
+store, err := cache.NewDisk("/var/cache/app", 1<<30)
+if err != nil {
+	log.Fatal(err)
+}
+
+h := host.New("static.example.com")
+h.Use(cache.New(store, cache.Options{MaxFileSize: 8 << 20}))
+h.Use(upstream.SingleHost("origin.default.svc.cluster.local", &upstream.HTTPTransport{}))
+s.Use(h)
+```
+
+`Options` also exposes `Cacheable` (a per-request predicate to exclude vetted paths), `InvalidatedAfter` (out-of-band purge), `LockTimeout`, and `DecoupleFill` (keep a slow client from stalling waiting followers). Because only origin-opted-in public content is cached, mark per-user or authorization-sensitive responses uncacheable at the origin.
 
 ## Trusted proxies
 
