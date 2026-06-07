@@ -33,6 +33,7 @@ type teeWriter struct {
 	ew         EntryWriter // nil = not caching this response
 	r          *http.Request
 	c          *Cache
+	lock       *fillLock // the leader's fill lock; its waiter count gates DecoupleFill
 	metaHeader http.Header
 	method     string
 	storeKey   string
@@ -78,11 +79,13 @@ func (tw *teeWriter) WriteHeader(code int) {
 			}
 		}
 	}
-	// DecoupleFill: when caching, buffer the body for the leader and stream it to
-	// storage, serving the client later (see fill/serveLeader) so a slow client can't
-	// hold the fill lock. Don't touch the client now. A non-cacheable response
-	// (ew == nil) still streams in lockstep.
-	if tw.ew != nil && tw.c.decoupleFill {
+	// DecoupleFill, but only when the fill is actually CONTENDED — at least one
+	// follower is already blocked on this lock. Then buffer the body for the leader
+	// and stream it to storage, serving the client later (see fill/serveLeader) so a
+	// slow client can't hold the lock from those followers. With no follower waiting
+	// there's nothing to isolate, so the leader streams in lockstep and pays no
+	// added latency. A non-cacheable response (ew == nil) always streams in lockstep.
+	if tw.ew != nil && tw.c.decoupleFill && tw.lock != nil && tw.lock.waiters.Load() > 0 {
 		tw.deferredClient = true
 		return
 	}
