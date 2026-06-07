@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -417,6 +418,39 @@ func TestCache_MetaCarriesHostURIForRange(t *testing.T) {
 			assert.Equal(t, "/p?q=1", m.URI)
 		}
 	})
+}
+
+func TestCache_MetaCapturesCacheTags(t *testing.T) {
+	eachBackend(t, func(t *testing.T, c *Cache) {
+		var calls int32
+		// Comma-separated, with surrounding spaces and a duplicate.
+		h := origin(originSpec{body: []byte("x"), header: hdr("Cache-Control", "max-age=60", "Cache-Tag", "product-42, category-shoes , product-42")}, &calls)
+		do(c, h, "GET", "http://acme.com/p", nil) // fill
+
+		got := map[string]Meta{}
+		c.storage.Range(func(k string, m Meta) bool { got[k] = m; return true })
+		require.Len(t, got, 1)
+		for _, m := range got {
+			assert.Equal(t, []string{"product-42", "category-shoes"}, m.Tags, "trimmed + de-duplicated, order preserved")
+		}
+	})
+}
+
+func TestParseCacheTags(t *testing.T) {
+	assert.Nil(t, parseCacheTags(http.Header{}), "no header -> nil")
+	assert.Nil(t, parseCacheTags(hdr("Cache-Tag", " , ,")), "only blanks -> nil")
+	assert.Equal(t, []string{"a", "b", "c"}, parseCacheTags(hdr("Cache-Tag", "a,b,c")))
+	// Multiple header lines are merged.
+	multi := http.Header{"Cache-Tag": {"a, b", "b, c"}}
+	assert.Equal(t, []string{"a", "b", "c"}, parseCacheTags(multi), "merged across header lines, deduped")
+	// Over-long tags are dropped; the count is capped.
+	long := strings.Repeat("x", maxCacheTagLen+1)
+	assert.Equal(t, []string{"ok"}, parseCacheTags(hdr("Cache-Tag", long+", ok")), "over-length tag dropped")
+	var many []string
+	for i := 0; i < maxCacheTags+10; i++ {
+		many = append(many, "t"+strconv.Itoa(i))
+	}
+	assert.Len(t, parseCacheTags(hdr("Cache-Tag", strings.Join(many, ","))), maxCacheTags, "count capped")
 }
 
 func TestCache_PanicDuringFillIsSafe(t *testing.T) {
