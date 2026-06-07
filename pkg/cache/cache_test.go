@@ -726,31 +726,50 @@ func TestCache_DecoupleFill_MissThenHit(t *testing.T) {
 	})
 }
 
-// The headline property: a leader whose own client is blocked must NOT hold the
-// fill lock — followers hit the just-committed entry immediately.
+// The headline property: under contention, a leader whose own client is blocked
+// must NOT hold the fill lock — followers hit the just-committed entry immediately.
 func TestCache_DecoupleFill_SlowLeaderDoesNotBlockFollowers(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{MaxFileSize: 1 << 20, DecoupleFill: true})
+	originEntered := make(chan struct{})
+	originGate := make(chan struct{})
 	var calls int32
-	h := origin(originSpec{body: []byte("payload"), header: hdr("Cache-Control", "max-age=60")}, &calls)
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		close(originEntered) // the leader is in origin (single-flight: called once)
+		<-originGate         // hold the leader here so followers can pile onto the lock
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Length", "7")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("payload"))
+	})
 	mw := c.ServeHandler(h)
 
+	// Leader with a slow client.
 	leaderRW := &blockingRW{release: make(chan struct{}), written: make(chan struct{})}
 	leaderDone := make(chan struct{})
 	go func() {
 		mw.ServeHTTP(leaderRW, httptest.NewRequest("GET", "http://acme.com/x", nil))
 		close(leaderDone)
 	}()
+	<-originEntered // leader holds the lock, blocked in origin
 
-	// Wait until the leader has committed + released and is blocked writing to its client.
-	select {
-	case <-leaderRW.written:
-	case <-time.After(2 * time.Second):
-		t.Fatal("leader never reached its client write")
+	// Followers pile onto the lock while the leader is still in origin (contention).
+	var fwg sync.WaitGroup
+	recs := make([]*httptest.ResponseRecorder, 5)
+	for i := range recs {
+		recs[i] = httptest.NewRecorder()
+		fwg.Add(1)
+		go func(i int) {
+			defer fwg.Done()
+			mw.ServeHTTP(recs[i], httptest.NewRequest("GET", "http://acme.com/x", nil))
+		}(i)
 	}
+	time.Sleep(50 * time.Millisecond) // let the followers reach the wait
 
-	// While the leader's client is blocked, followers get an immediate HIT.
-	for i := 0; i < 5; i++ {
-		rec := do(c, h, "GET", "http://acme.com/x", nil)
+	close(originGate) // leader proceeds; WriteHeader sees waiters>0 -> decouple, commit, release
+	fwg.Wait()        // followers complete WITHOUT the leader's blocked client being released
+
+	for _, rec := range recs {
 		assert.Equal(t, "HIT", rec.Header().Get("X-Cache"), "follower hits while the leader's client is blocked")
 		assert.Equal(t, "payload", rec.Body.String())
 	}
@@ -819,22 +838,78 @@ func TestCache_DecoupleFill_TruncatedNotCached(t *testing.T) {
 	assert.EqualValues(t, 2, atomic.LoadInt32(&calls))
 }
 
-// The decoupled leader's own response has hop-by-hop headers stripped and no Age
-// header (the body is served from the buffer, not via the HIT path).
+// decoupledContended drives one decoupled leader fill that is guaranteed contended
+// (followers wait on the lock before the leader's WriteHeader, via a gated origin),
+// and returns the leader's recorder plus the origin call count. write produces the
+// response inside the origin (after the gate).
+func decoupledContended(t *testing.T, c *Cache, target string, write func(w http.ResponseWriter)) (*httptest.ResponseRecorder, int32) {
+	t.Helper()
+	originEntered := make(chan struct{})
+	originGate := make(chan struct{})
+	var calls int32
+	var once sync.Once
+	mw := c.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		once.Do(func() { close(originEntered) })
+		<-originGate
+		write(w)
+	}))
+
+	leaderRec := httptest.NewRecorder()
+	leaderDone := make(chan struct{})
+	go func() {
+		mw.ServeHTTP(leaderRec, httptest.NewRequest("GET", target, nil))
+		close(leaderDone)
+	}()
+	<-originEntered // leader holds the lock, blocked in origin
+
+	var fwg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		fwg.Add(1)
+		go func() {
+			defer fwg.Done()
+			mw.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", target, nil))
+		}()
+	}
+	time.Sleep(50 * time.Millisecond) // let the followers reach the wait
+
+	close(originGate)
+	<-leaderDone
+	fwg.Wait()
+	return leaderRec, atomic.LoadInt32(&calls)
+}
+
+// Under contention the decoupled leader's own response has hop-by-hop headers
+// stripped and no Age header (the body is served from the buffer, not the HIT path).
 func TestCache_DecoupleFill_LeaderHeadersSanitized(t *testing.T) {
 	eachBackendDecoupled(t, func(t *testing.T, c *Cache) {
-		var calls int32
-		h := origin(originSpec{
-			body:   []byte("ok"),
-			header: hdr("Cache-Control", "max-age=60", "Connection", "keep-alive", "X-App", "yes"),
-		}, &calls)
-		r := do(c, h, "GET", "http://acme.com/s", nil)
-		assert.Equal(t, "MISS", r.Header().Get("X-Cache"))
-		assert.Equal(t, "ok", r.Body.String())
-		assert.Equal(t, "yes", r.Header().Get("X-App"), "end-to-end header kept")
-		assert.Equal(t, "", r.Header().Get("Connection"), "hop-by-hop stripped from the decoupled leader")
-		assert.Equal(t, "", r.Header().Get("Age"), "a MISS carries no Age header")
+		leaderRec, calls := decoupledContended(t, c, "http://acme.com/s", func(w http.ResponseWriter) {
+			w.Header().Set("Cache-Control", "max-age=60")
+			w.Header().Set("Connection", "keep-alive")
+			w.Header().Set("X-App", "yes")
+			w.Header().Set("Content-Length", "2")
+			w.WriteHeader(200)
+			_, _ = w.Write([]byte("ok"))
+		})
+		assert.EqualValues(t, 1, calls, "origin contacted once")
+		assert.Equal(t, "MISS", leaderRec.Header().Get("X-Cache"))
+		assert.Equal(t, "ok", leaderRec.Body.String())
+		assert.Equal(t, "yes", leaderRec.Header().Get("X-App"), "end-to-end header kept")
+		assert.Equal(t, "", leaderRec.Header().Get("Connection"), "hop-by-hop stripped from the decoupled leader")
+		assert.Equal(t, "", leaderRec.Header().Get("Age"), "a MISS carries no Age header")
 	})
+}
+
+// Without contention (no follower waiting), DecoupleFill streams in lockstep — the
+// leader's raw headers pass straight through, with no buffering.
+func TestCache_DecoupleFill_SoloUsesLockstep(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024, DecoupleFill: true})
+	var calls int32
+	h := origin(originSpec{body: []byte("ok"), header: hdr("Cache-Control", "max-age=60", "Connection", "keep-alive")}, &calls)
+	r := do(c, h, "GET", "http://acme.com/solo", nil)
+	assert.Equal(t, "MISS", r.Header().Get("X-Cache"))
+	assert.Equal(t, "ok", r.Body.String())
+	assert.Equal(t, "keep-alive", r.Header().Get("Connection"), "uncontended fill streams in lockstep (raw headers)")
 }
 
 // A mid-fill storage write failure must still deliver the full body to the leader

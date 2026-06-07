@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/moonrhythm/parapet"
@@ -67,23 +68,26 @@ type Options struct {
 	LockTimeout time.Duration
 
 	// DecoupleFill, when true, stops a slow leader client (or a slow disk) from
-	// holding the fill lock while the response streams to that client. A cacheable
-	// fill is read from the origin at origin speed — the leader's client receives
-	// nothing until the fill is done — while the body is streamed to storage and also
-	// buffered in memory for the leader (so the leader's response never depends on the
-	// stored entry, which may expire, be evicted, or be purged). The entry is then
-	// committed, the fill lock is released (waiting followers immediately hit the
-	// cache), and only then is the leader's own client served from the buffered body.
+	// holding the fill lock — and thus stalling waiting followers — while its response
+	// streams to that client. It engages only when the fill is CONTENDED, i.e. at
+	// least one follower is already blocked waiting for it (the stampede case
+	// single-flight exists for); an uncontended fill has nothing to isolate and
+	// streams to the client in lockstep with no added latency.
 	//
-	// It trades the leader's time-to-first-byte (it waits for the whole fill) and an
-	// extra in-memory copy of the leader's body (bounded by MaxFileSize, per in-flight
-	// decoupled fill) for follower isolation, and serves the leader the sanitized
-	// response headers (hop-by-hop stripped, no Age) rather than the raw origin
-	// headers. Non-cacheable responses, and cacheable ones whose handler relies on
-	// incremental flushing, are unaffected (streamed to the client in lockstep; a
-	// Flush during a decoupled fill is ignored). When false (default), the leader
-	// streams its response in lockstep and holds the fill lock until that stream and
-	// the commit finish (see LockTimeout).
+	// When it engages, the cacheable body is read from the origin at origin speed —
+	// the leader's client receives nothing until the fill is done — while it is
+	// streamed to storage and also buffered in memory for the leader (so the leader's
+	// response never depends on the stored entry, which may expire, be evicted, or be
+	// purged). The entry is then committed, the fill lock released (waiting followers
+	// immediately hit the cache), and only then is the leader's own client served from
+	// the buffered body. This trades the leader's time-to-first-byte (it waits for the
+	// whole fill) and an extra in-memory copy of the leader's body (bounded by
+	// MaxFileSize, per in-flight decoupled fill) for follower isolation, and serves
+	// the leader the sanitized response headers (hop-by-hop stripped, no Age) rather
+	// than the raw origin headers. A handler that relies on incremental flushing is
+	// unaffected (a Flush during a decoupled fill is ignored). When false (default),
+	// the leader always streams in lockstep and holds the fill lock until that stream
+	// and the commit finish (see LockTimeout).
 	DecoupleFill bool
 }
 
@@ -106,8 +110,11 @@ type Cache struct {
 
 // fillLock coordinates concurrent misses for one variant: the leader fills, the
 // rest wait on done (then re-read the cache) or time out and fetch on their own.
+// waiters counts the followers currently blocked on done — the leader reads it to
+// decide whether a fill is contended (see DecoupleFill).
 type fillLock struct {
-	done chan struct{}
+	done    chan struct{}
+	waiters atomic.Int32
 }
 
 // New builds the cache middleware over the given Storage backend (memory or
@@ -202,10 +209,12 @@ func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.H
 			c.fill(w, r, next, primaryHex, variantHex, lock)
 			return
 		}
+		lock.waiters.Add(1)
 		select {
 		case <-lock.done:
 		case <-time.After(c.lockTimeout):
 		}
+		lock.waiters.Add(-1)
 		// Leader finished (or we timed out). Re-read: it may have just learned this
 		// primary's Vary, so our key now matches the stored entry IF our varied
 		// values match the leader's. A wrong-Vary variant is never served.
@@ -237,7 +246,7 @@ func (c *Cache) fill(w http.ResponseWriter, r *http.Request, next http.Handler, 
 	}
 	defer release() // ensure the lock is freed on every path (incl. panic)
 
-	tw := &teeWriter{rw: w, r: r, c: c, method: r.Method, primaryHex: primaryHex}
+	tw := &teeWriter{rw: w, r: r, c: c, method: r.Method, primaryHex: primaryHex, lock: lock}
 	defer tw.cleanup() // panic-safe: abort an uncommitted entry if finish never ran
 	next.ServeHTTP(tw, r)
 	tw.finish()
