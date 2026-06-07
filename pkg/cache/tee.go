@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -39,6 +40,7 @@ type teeWriter struct {
 	storeKey   string
 	primaryHex string
 	vary       []string     // sorted, lowercased
+	tags       []string     // surrogate keys parsed from the response Cache-Tag header
 	leaderBuf  bytes.Buffer // DecoupleFill: the leader's own copy of the body, served after the lock is released
 	written    int64
 	contentLen int64
@@ -71,6 +73,7 @@ func (tw *teeWriter) WriteHeader(code int) {
 			tw.ew = ew
 			tw.storeKey = storeKey
 			tw.vary = vary
+			tw.tags = parseCacheTags(h)
 			tw.freshUntil = dec.freshUntil
 			tw.metaHeader = sanitizeHeader(h)
 			if cl, ok := contentLength(h); ok {
@@ -169,6 +172,7 @@ func (tw *teeWriter) finish() {
 		Host:       normalizeHost(tw.r.Host),
 		URI:        tw.r.URL.RequestURI(),
 		Vary:       tw.vary,
+		Tags:       tw.tags,
 		Created:    time.Now().UnixNano(),
 		FreshUntil: tw.freshUntil.UnixNano(),
 		Size:       tw.written,
@@ -239,4 +243,43 @@ func sanitizeHeader(h http.Header) http.Header {
 		out[k] = append([]string(nil), vs...)
 	}
 	return out
+}
+
+// Surrogate-key (Cache-Tag) caps: an entry's tags are stored in its Meta and held
+// in RAM by the memory backend, so bound both the count and the length per entry so
+// a hostile/buggy origin can't bloat metadata.
+const (
+	maxCacheTags   = 64
+	maxCacheTagLen = 256
+)
+
+// parseCacheTags extracts surrogate keys from the response Cache-Tag header(s):
+// comma-separated, trimmed, de-duplicated, and capped (count + per-tag length).
+// Returns nil when there are none, so a no-tag response stores no Tags. The header
+// is left on the response (capture-only) — strip it at the origin if it must not
+// reach clients.
+func parseCacheTags(h http.Header) []string {
+	values := h.Values("Cache-Tag")
+	if len(values) == 0 {
+		return nil
+	}
+	var tags []string
+	seen := make(map[string]struct{})
+	for _, v := range values {
+		for _, t := range strings.Split(v, ",") {
+			t = strings.TrimSpace(t)
+			if t == "" || len(t) > maxCacheTagLen {
+				continue
+			}
+			if _, dup := seen[t]; dup {
+				continue
+			}
+			seen[t] = struct{}{}
+			tags = append(tags, t)
+			if len(tags) >= maxCacheTags {
+				return tags
+			}
+		}
+	}
+	return tags
 }

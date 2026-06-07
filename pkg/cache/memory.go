@@ -43,10 +43,10 @@ func (s *MemoryStorage) Get(key string) (Meta, []byte, bool) {
 	return cloneMeta(e.meta), e.body, true
 }
 
-// cloneMeta returns m with its Header map and Vary slice deep-copied, so a caller
-// can't mutate (or data-race) the live stored entry's metadata. The body is not
-// copied (it is large and read-only by contract). The disk backend gets this for
-// free by unmarshaling a fresh Meta per call.
+// cloneMeta returns m with its Header map and Vary/Tags slices deep-copied, so a
+// caller can't mutate (or data-race) the live stored entry's metadata. The body is
+// not copied (it is large and read-only by contract). The disk backend gets this
+// for free by unmarshaling a fresh Meta per call.
 func cloneMeta(m Meta) Meta {
 	if m.Header != nil {
 		h := make(http.Header, len(m.Header))
@@ -57,6 +57,9 @@ func cloneMeta(m Meta) Meta {
 	}
 	if m.Vary != nil {
 		m.Vary = append([]string(nil), m.Vary...)
+	}
+	if m.Tags != nil {
+		m.Tags = append([]string(nil), m.Tags...)
 	}
 	return m
 }

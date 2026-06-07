@@ -96,6 +96,7 @@ type Meta struct {
 	Host       string      `json:"host,omitempty"` // normalized host (lowercased, port-stripped); for out-of-band Range maintenance
 	URI        string      `json:"uri,omitempty"`  // request-uri (path+query); for out-of-band Range maintenance
 	Vary       []string    `json:"vary"`           // lowercased Vary header names
+	Tags       []string    `json:"tags,omitempty"` // surrogate keys from the response Cache-Tag header; for out-of-band tag-scoped Range maintenance
 	Created    int64       `json:"created"`        // unix nanos
 	FreshUntil int64       `json:"fresh"`          // unix nanos; entry is stale after this
 	Size       int64       `json:"size"`           // body bytes (== eviction weight)
