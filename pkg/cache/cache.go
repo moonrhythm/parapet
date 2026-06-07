@@ -65,6 +65,26 @@ type Options struct {
 	// slow fill (fewer origin fetches, higher follower latency); lower it to fail
 	// fast (more origin fetches under load). Defaults to 2s when <= 0.
 	LockTimeout time.Duration
+
+	// DecoupleFill, when true, stops a slow leader client (or a slow disk) from
+	// holding the fill lock while the response streams to that client. A cacheable
+	// fill is read from the origin at origin speed — the leader's client receives
+	// nothing until the fill is done — while the body is streamed to storage and also
+	// buffered in memory for the leader (so the leader's response never depends on the
+	// stored entry, which may expire, be evicted, or be purged). The entry is then
+	// committed, the fill lock is released (waiting followers immediately hit the
+	// cache), and only then is the leader's own client served from the buffered body.
+	//
+	// It trades the leader's time-to-first-byte (it waits for the whole fill) and an
+	// extra in-memory copy of the leader's body (bounded by MaxFileSize, per in-flight
+	// decoupled fill) for follower isolation, and serves the leader the sanitized
+	// response headers (hop-by-hop stripped, no Age) rather than the raw origin
+	// headers. Non-cacheable responses, and cacheable ones whose handler relies on
+	// incremental flushing, are unaffected (streamed to the client in lockstep; a
+	// Flush during a decoupled fill is ignored). When false (default), the leader
+	// streams its response in lockstep and holds the fill lock until that stream and
+	// the commit finish (see LockTimeout).
+	DecoupleFill bool
 }
 
 // Cache is the HTTP response-cache middleware. It implements parapet.Middleware
@@ -77,6 +97,7 @@ type Cache struct {
 	locks            map[string]*fillLock // variantHex -> in-flight fill
 	maxFileSize      int64
 	lockTimeout      time.Duration
+	decoupleFill     bool
 
 	pvMu sync.RWMutex
 
@@ -106,6 +127,7 @@ func New(storage Storage, opts Options) *Cache {
 		lockTimeout:      lt,
 		invalidatedAfter: opts.InvalidatedAfter,
 		cacheable:        opts.Cacheable,
+		decoupleFill:     opts.DecoupleFill,
 		primaryVary:      map[string][]string{},
 		locks:            map[string]*fillLock{},
 	}
@@ -206,11 +228,28 @@ func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.H
 // that also writes the cacheable body to storage, commit on completion, then
 // release the fill lock so waiting followers find the committed entry.
 func (c *Cache) fill(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex, variantHex string, lock *fillLock) {
-	defer c.release(variantHex, lock)
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			c.release(variantHex, lock)
+		}
+	}
+	defer release() // ensure the lock is freed on every path (incl. panic)
+
 	tw := &teeWriter{rw: w, r: r, c: c, method: r.Method, primaryHex: primaryHex}
 	defer tw.cleanup() // panic-safe: abort an uncommitted entry if finish never ran
 	next.ServeHTTP(tw, r)
 	tw.finish()
+
+	// DecoupleFill: the cacheable body was streamed to storage, not the client, so
+	// release the lock now (waiting followers find the committed entry) and only then
+	// serve this leader's own — possibly slow — client from the committed entry. In
+	// lockstep mode the client already has the full response; release runs via defer.
+	if tw.deferredClient {
+		release()
+		tw.serveLeader()
+	}
 }
 
 func (c *Cache) acquire(variantHex string) (*fillLock, bool) {

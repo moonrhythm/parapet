@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"bytes"
 	"net/http"
 	"sort"
 	"time"
@@ -28,21 +29,23 @@ var hopByHop = map[string]struct{}{
 // Aborts on a panic before finish so no temp/partial state is left.
 type teeWriter struct {
 	freshUntil time.Time
-	ew         EntryWriter // nil = not caching this response
 	rw         http.ResponseWriter
+	ew         EntryWriter // nil = not caching this response
 	r          *http.Request
 	c          *Cache
 	metaHeader http.Header
 	method     string
 	storeKey   string
 	primaryHex string
-	vary       []string // sorted, lowercased
+	vary       []string     // sorted, lowercased
+	leaderBuf  bytes.Buffer // DecoupleFill: the leader's own copy of the body, served after the lock is released
 	written    int64
 	contentLen int64
 	status     int
 
-	wroteHeader bool
-	hasCL       bool
+	wroteHeader    bool
+	hasCL          bool
+	deferredClient bool // DecoupleFill: body buffered for the leader; the client is served later
 }
 
 func (tw *teeWriter) Header() http.Header { return tw.rw.Header() }
@@ -75,6 +78,14 @@ func (tw *teeWriter) WriteHeader(code int) {
 			}
 		}
 	}
+	// DecoupleFill: when caching, buffer the body for the leader and stream it to
+	// storage, serving the client later (see fill/serveLeader) so a slow client can't
+	// hold the fill lock. Don't touch the client now. A non-cacheable response
+	// (ew == nil) still streams in lockstep.
+	if tw.ew != nil && tw.c.decoupleFill {
+		tw.deferredClient = true
+		return
+	}
 	h.Set("X-Cache", "MISS")
 	tw.rw.WriteHeader(code)
 }
@@ -82,6 +93,34 @@ func (tw *teeWriter) WriteHeader(code int) {
 func (tw *teeWriter) Write(p []byte) (int, error) {
 	if !tw.wroteHeader {
 		tw.WriteHeader(http.StatusOK)
+	}
+	// DecoupleFill: don't touch (or block on) the client now — keep the leader's own
+	// copy of the body (capped at maxFileSize) and, independently, stream to storage.
+	// serveLeader writes the buffered copy to the client after the lock is released,
+	// so the leader always gets exactly what the origin produced regardless of whether
+	// caching succeeds (an oversize/error/truncated fill just isn't cached). Report
+	// success to the origin handler.
+	if tw.deferredClient {
+		if room := tw.c.maxFileSize - int64(tw.leaderBuf.Len()); room > 0 {
+			if int64(len(p)) <= room {
+				tw.leaderBuf.Write(p)
+			} else {
+				tw.leaderBuf.Write(p[:room])
+			}
+		}
+		if tw.ew != nil {
+			switch {
+			case tw.written+int64(len(p)) > tw.c.maxFileSize:
+				tw.abort()
+			default:
+				if _, werr := tw.ew.Write(p); werr != nil {
+					tw.abort()
+				} else {
+					tw.written += int64(len(p))
+				}
+			}
+		}
+		return len(p), nil
 	}
 	n, err := tw.rw.Write(p)
 	if tw.ew != nil {
@@ -137,6 +176,29 @@ func (tw *teeWriter) finish() {
 	tw.ew = nil
 }
 
+// serveLeader writes the response to the leader's client AFTER the fill lock has
+// been released (DecoupleFill). It serves the body the leader buffered during the
+// fill — never reading back from storage — so it is unaffected by whether the entry
+// was committed, evicted, deleted, or purged in the meantime. It serves the
+// sanitized response headers (hop-by-hop stripped, like a stored entry) tagged MISS,
+// since this request contacted the origin. A truncated/over-cap fill simply yields
+// the bytes the origin actually wrote (matching the lockstep path); HEAD and bodiless
+// statuses carry no body.
+func (tw *teeWriter) serveLeader() {
+	h := tw.rw.Header()
+	for k := range h { // drop the origin's raw (unsanitized) headers
+		delete(h, k)
+	}
+	for k, vs := range tw.metaHeader {
+		h[k] = append([]string(nil), vs...)
+	}
+	h.Set("X-Cache", "MISS")
+	tw.rw.WriteHeader(tw.status)
+	if tw.method != http.MethodHead && tw.status != http.StatusNoContent {
+		_, _ = tw.rw.Write(tw.leaderBuf.Bytes())
+	}
+}
+
 // cleanup aborts an uncommitted entry. Deferred on the leader path so a panic in
 // the upstream handler (before finish) doesn't leak the temp file.
 func (tw *teeWriter) cleanup() {
@@ -146,8 +208,14 @@ func (tw *teeWriter) cleanup() {
 	}
 }
 
-// Flush forwards to the underlying writer so streaming responses still flush.
+// Flush forwards to the underlying writer so streaming responses still flush. In
+// DecoupleFill mode it is a no-op while buffering: the client hasn't been written
+// to yet, so flushing it would prematurely commit a 200 and defeat the deferral
+// (the whole response is delivered at once from storage by serveLeader).
 func (tw *teeWriter) Flush() {
+	if tw.deferredClient {
+		return
+	}
 	if f, ok := tw.rw.(http.Flusher); ok {
 		f.Flush()
 	}
