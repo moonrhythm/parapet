@@ -18,10 +18,11 @@ import (
 // "kid" from the token's JOSE header ("" when the token carries none); an
 // implementation may use it to decide whether a refresh is warranted.
 //
-// The returned value must be one of the types go-jose accepts for verification
-// (see JWT). Returning a *jose.JSONWebKeySet is the common case: go-jose then
-// selects the key whose "kid" matches the token header and verifies with the
-// algorithm the JWTAuthenticator pinned.
+// The returned value must be a key the verifier accepts: a standard public key
+// (*rsa.PublicKey, *ecdsa.PublicKey, ed25519.PublicKey) or an HMAC []byte (see
+// JWT). The built-in JWKS returns a key set keyed by "kid"; the token's pinned
+// algorithm is still enforced by JWTAuthenticator regardless of what is
+// returned.
 type KeySource interface {
 	VerificationKey(ctx context.Context, kid string) (any, error)
 }

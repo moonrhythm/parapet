@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	jose "github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 
 	"github.com/moonrhythm/parapet/pkg/header"
@@ -27,13 +26,16 @@ var ErrInvalidToken = errors.New("invalid token")
 // prevents algorithm-confusion attacks, where an attacker re-signs a token with
 // an algorithm the verifier did not intend to accept.
 //
-// key may be any type go-jose accepts for verification: []byte for HMAC
-// (HS256/384/512), an *rsa.PublicKey, *ecdsa.PublicKey or ed25519.PublicKey for
-// asymmetric signatures, or a *jose.JSONWebKey / *jose.JSONWebKeySet.
+// algs pins the accepted algorithms with this package's SignatureAlgorithm
+// constants (e.g. authn.RS256) — callers don't import a JOSE library.
+//
+// key is a standard crypto key: []byte for HMAC (HS256/384/512), or an
+// *rsa.PublicKey, *ecdsa.PublicKey or ed25519.PublicKey for asymmetric
+// signatures.
 //
 // To verify against a rotating remote key set instead of a static key, leave
 // key nil and set JWTAuthenticator.KeySource (see JWTFromKeySource and JWKS).
-func JWT(key any, algs ...jose.SignatureAlgorithm) *JWTAuthenticator {
+func JWT(key any, algs ...SignatureAlgorithm) *JWTAuthenticator {
 	return &JWTAuthenticator{
 		Key:        key,
 		Algorithms: algs,
@@ -44,7 +46,7 @@ func JWT(key any, algs ...jose.SignatureAlgorithm) *JWTAuthenticator {
 // resolves its verification key from src at request time — typically a remote,
 // rotating JWKS via JWKS — instead of a fixed key. The algorithm allowlist is
 // still mandatory and enforced exactly as in JWT.
-func JWTFromKeySource(src KeySource, algs ...jose.SignatureAlgorithm) *JWTAuthenticator {
+func JWTFromKeySource(src KeySource, algs ...SignatureAlgorithm) *JWTAuthenticator {
 	return &JWTAuthenticator{
 		KeySource:  src,
 		Algorithms: algs,
@@ -66,7 +68,7 @@ type JWTAuthenticator struct {
 
 	// Algorithms is the set of accepted signature algorithms. It is required;
 	// when empty every request is rejected.
-	Algorithms []jose.SignatureAlgorithm
+	Algorithms []SignatureAlgorithm
 
 	// Issuer and Audience, when set, must match the token's "iss" and "aud"
 	// claims respectively.
@@ -107,6 +109,9 @@ func (m JWTAuthenticator) ServeHandler(h http.Handler) http.Handler {
 		now = time.Now
 	}
 
+	// Convert the pinned algorithms to the JOSE type once, at setup.
+	algs := toJOSEAlgorithms(m.Algorithms)
+
 	return Authenticator{
 		Type:            challenge,
 		ShareValueSlice: m.ShareValueSlice,
@@ -118,11 +123,11 @@ func (m JWTAuthenticator) ServeHandler(h http.Handler) http.Handler {
 
 			// Fail closed when no algorithm is pinned, rather than trusting
 			// whatever the token header claims.
-			if len(m.Algorithms) == 0 {
+			if len(algs) == 0 {
 				return ErrInvalidToken
 			}
 
-			tok, err := jwt.ParseSigned(raw, m.Algorithms)
+			tok, err := jwt.ParseSigned(raw, algs)
 			if err != nil {
 				return ErrInvalidToken
 			}

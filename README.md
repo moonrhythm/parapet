@@ -217,13 +217,13 @@ prevents algorithm-confusion attacks. The signature, `exp`/`nbf` (with leeway),
 and optional `iss`/`aud` claims are all verified; verified claims are placed on
 the request context for downstream handlers.
 
-```go
-import (
-	jose "github.com/go-jose/go-jose/v4"
-	"github.com/moonrhythm/parapet/pkg/authn"
-)
+Algorithms are pinned with this package's own constants (`authn.HS256`,
+`authn.RS256`, …), so callers don't import a JOSE library — only `pkg/authn`.
 
-m := authn.JWT([]byte(secret), jose.HS256) // []byte for HMAC; a public key for RS*/ES*/EdDSA
+```go
+import "github.com/moonrhythm/parapet/pkg/authn"
+
+m := authn.JWT([]byte(secret), authn.HS256) // []byte for HMAC; a public key for RS*/ES*/EdDSA
 m.Issuer = "https://issuer.example.com"
 m.Audience = "my-api"
 s.Use(m)
@@ -247,7 +247,7 @@ and enforced exactly as above.
 ```go
 m := authn.JWTFromKeySource(
 	&authn.JWKS{URL: "https://issuer.example.com/.well-known/jwks.json"},
-	jose.RS256, // pin the accepted algorithm(s)
+	authn.RS256, // pin the accepted algorithm(s)
 )
 m.Issuer = "https://issuer.example.com"
 m.Audience = "my-api"

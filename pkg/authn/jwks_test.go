@@ -117,7 +117,7 @@ func TestJWKS(t *testing.T) {
 		srv, ts := newServer(pubJWK(k1, "k1"))
 		defer ts.Close()
 
-		m := JWTFromKeySource(&JWKS{URL: ts.URL}, jose.RS256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL}, RS256)
 		m.Now = fixedNow
 		token := signRSA(t, k1, "k1", validClaims())
 
@@ -140,7 +140,7 @@ func TestJWKS(t *testing.T) {
 		defer ts.Close()
 
 		clock := &testClock{t: jwtNow}
-		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, MinRefreshInterval: time.Minute}, jose.RS256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, MinRefreshInterval: time.Minute}, RS256)
 		m.Now = fixedNow
 
 		// Prime the cache with the k1 set.
@@ -163,7 +163,7 @@ func TestJWKS(t *testing.T) {
 		defer ts.Close()
 
 		clock := &testClock{t: jwtNow}
-		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, MinRefreshInterval: time.Hour}, jose.RS256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, MinRefreshInterval: time.Hour}, RS256)
 		m.Now = fixedNow
 
 		w, _ := serveJWT(m, signRSA(t, k1, "k1", validClaims()))
@@ -182,7 +182,7 @@ func TestJWKS(t *testing.T) {
 		defer ts.Close()
 
 		clock := &testClock{t: jwtNow}
-		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, RefreshInterval: 15 * time.Minute}, jose.RS256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, RefreshInterval: 15 * time.Minute}, RS256)
 		m.Now = fixedNow
 
 		w, _ := serveJWT(m, signRSA(t, k1, "k1", validClaims()))
@@ -211,7 +211,7 @@ func TestJWKS(t *testing.T) {
 		defer ts.Close()
 
 		clock := &testClock{t: jwtNow}
-		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, RefreshInterval: 15 * time.Minute}, jose.RS256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL, Now: clock.now, RefreshInterval: 15 * time.Minute}, RS256)
 		m.Now = fixedNow
 
 		w, _ := serveJWT(m, signRSA(t, k1, "k1", validClaims()))
@@ -236,7 +236,7 @@ func TestJWKS(t *testing.T) {
 		defer ts.Close()
 		srv.setStatus(http.StatusInternalServerError)
 
-		m := JWTFromKeySource(&JWKS{URL: ts.URL}, jose.RS256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL}, RS256)
 		m.Now = fixedNow
 
 		w, got := serveJWT(m, signRSA(t, k1, "k1", validClaims()))
@@ -258,7 +258,7 @@ func TestJWKS(t *testing.T) {
 		_, ts := newServer(pubJWK(k1, "k1"))
 		defer ts.Close()
 
-		m := JWTFromKeySource(&JWKS{URL: ts.URL}, jose.RS256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL}, RS256)
 		m.Now = fixedNow
 
 		// kid claims k1 but the token is actually signed by k2.
@@ -272,7 +272,7 @@ func TestJWKS(t *testing.T) {
 		defer ts.Close()
 
 		// Pin ES256 while the token is RS256: rejected before key lookup.
-		m := JWTFromKeySource(&JWKS{URL: ts.URL}, jose.ES256)
+		m := JWTFromKeySource(&JWKS{URL: ts.URL}, ES256)
 		m.Now = fixedNow
 
 		w, _ := serveJWT(m, signRSA(t, k1, "k1", validClaims()))
@@ -283,7 +283,7 @@ func TestJWKS(t *testing.T) {
 		srv, ts := newServer(pubJWK(k1, "k1"))
 		defer ts.Close()
 
-		m := JWTFromKeySource(&JWKS{URL: ts.URL}, jose.RS256) // pinned alg
+		m := JWTFromKeySource(&JWKS{URL: ts.URL}, RS256) // pinned alg
 		m.Algorithms = nil                                    // ...then cleared
 		m.Now = fixedNow
 

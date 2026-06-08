@@ -58,7 +58,7 @@ func TestJWT(t *testing.T) {
 			Subject: "user1",
 			Expiry:  jwt.NewNumericDate(jwtNow.Add(time.Hour)),
 		})
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		m.Now = fixedNow
 
 		w, got := serveJWT(m, token)
@@ -70,7 +70,7 @@ func TestJWT(t *testing.T) {
 	})
 
 	t.Run("MissingAuthorization", func(t *testing.T) {
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		m.Realm = "api"
 		w, got := serveJWT(m, "")
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -79,7 +79,7 @@ func TestJWT(t *testing.T) {
 	})
 
 	t.Run("NotBearer", func(t *testing.T) {
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			assert.Fail(t, "must not be called")
 		}))
@@ -101,7 +101,7 @@ func TestJWT(t *testing.T) {
 
 	t.Run("WrongAlgorithmRejected", func(t *testing.T) {
 		token := signToken(t, jose.HS256, jwtSecret, jwt.Claims{Subject: "user1"})
-		m := JWT(jwtSecret, jose.HS384) // token is HS256
+		m := JWT(jwtSecret, HS384) // token is HS256
 		m.Now = fixedNow
 		w, _ := serveJWT(m, token)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -109,7 +109,7 @@ func TestJWT(t *testing.T) {
 
 	t.Run("BadSignatureRejected", func(t *testing.T) {
 		token := signToken(t, jose.HS256, jwtSecret, jwt.Claims{Subject: "user1"})
-		m := JWT(jwtOtherSecret, jose.HS256) // verifies with the wrong key
+		m := JWT(jwtOtherSecret, HS256) // verifies with the wrong key
 		m.Now = fixedNow
 		w, _ := serveJWT(m, token)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -120,7 +120,7 @@ func TestJWT(t *testing.T) {
 			Subject: "user1",
 			Expiry:  jwt.NewNumericDate(jwtNow.Add(-time.Hour)),
 		})
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		m.Now = fixedNow
 		w, _ := serveJWT(m, token)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -131,7 +131,7 @@ func TestJWT(t *testing.T) {
 			Subject:   "user1",
 			NotBefore: jwt.NewNumericDate(jwtNow.Add(time.Hour)),
 		})
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		m.Now = fixedNow
 		w, _ := serveJWT(m, token)
 		assert.Equal(t, http.StatusUnauthorized, w.Code)
@@ -139,7 +139,7 @@ func TestJWT(t *testing.T) {
 
 	t.Run("Issuer", func(t *testing.T) {
 		token := signToken(t, jose.HS256, jwtSecret, jwt.Claims{Issuer: "good"})
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		m.Now = fixedNow
 		m.Issuer = "good"
 		w, _ := serveJWT(m, token)
@@ -152,7 +152,7 @@ func TestJWT(t *testing.T) {
 
 	t.Run("Audience", func(t *testing.T) {
 		token := signToken(t, jose.HS256, jwtSecret, jwt.Claims{Audience: jwt.Audience{"svc"}})
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		m.Now = fixedNow
 		m.Audience = "svc"
 		w, _ := serveJWT(m, token)
@@ -164,7 +164,7 @@ func TestJWT(t *testing.T) {
 	})
 
 	t.Run("ShareValueSlice", func(t *testing.T) {
-		m := JWT(jwtSecret, jose.HS256)
+		m := JWT(jwtSecret, HS256)
 		m.Realm = "api"
 		m.ShareValueSlice = true
 		h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
