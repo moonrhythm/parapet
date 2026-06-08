@@ -42,6 +42,7 @@ Each subdirectory under `pkg/` is a self-contained middleware:
 | [`ratelimit`](pkg/ratelimit) | Fixed-window, concurrent, and leaky-bucket limiters |
 | [`compress`](pkg/compress) | Content-negotiated compression (Gzip, Brotli, Deflate) |
 | [`cache`](pkg/cache) | HTTP response cache — honor-origin policy, in-memory or disk backend, single-flight fills, `X-Cache` tag |
+| [`cache/purge`](pkg/cache/purge) | Cache invalidation — purge by host, URL, path prefix, or surrogate tag, plus a reaper |
 | [`body`](pkg/body) | Request body limiting and buffering |
 | [`headers`](pkg/headers) | Request/response header manipulation |
 | [`cors`](pkg/cors) | CORS handling |
@@ -341,6 +342,24 @@ h.Use(cache.New(store, cache.Options{}))                                       /
 h.Use(headers.AddResponse("Cache-Control", "stale-while-revalidate=30"))       // below the cache
 h.Use(upstream.SingleHost("origin...", &upstream.HTTPTransport{}))             // inner
 ```
+
+### Purging
+
+[`cache/purge`](pkg/cache/purge) invalidates cached entries by **host, URL, path prefix, or surrogate tag** (the origin's `Cache-Tag`). A `purge.Table` plugs into `Options.InvalidatedAfter`; invalidation is lazy (issuing a purge is O(1), a purged entry is reclaimed on its next lookup) and immediate (a purged entry is never served). Memory is bounded — an overflowing scope map folds into a global flush — and epochs are monotonic, so an NTP step-back can't un-purge.
+
+```go
+pt := purge.New()
+c := cache.New(store, cache.Options{InvalidatedAfter: pt.InvalidatedAfter})
+
+pt.PurgeURL("example.com", "/a")        // one URL: all methods/schemes/Vary variants
+pt.PurgePrefix("example.com", "/blog")  // a section, boundary-aware (/blog, not /blogger)
+pt.PurgeTag("product-42")               // every response carrying this surrogate key, any host
+pt.FlushAll()                           // everything
+
+go func() { for range time.Tick(5 * time.Minute) { pt.Reap(store) } }() // proactively reclaim bytes
+```
+
+`Snapshot`/`Restore` serialize the table so purges survive a restart (persist however you like). It's the engine [parapet-ingress-controller](https://github.com/moonrhythm/parapet-ingress-controller) builds its control-plane purge distribution on top of.
 
 ## Trusted proxies
 
