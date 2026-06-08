@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"context"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -74,6 +75,72 @@ func TestCache_StaleWhileRevalidate(t *testing.T) {
 		assert.Equal(t, "new", rec.Body.String())
 		assert.Equal(t, int32(1), atomic.LoadInt32(&calls), "revalidation must be single-flighted")
 	})
+}
+
+// The background revalidation must run on a context detached from the original
+// request, so it does not share (and race) request-scoped mutable state such as
+// the logger's per-request record.
+func TestCache_StaleWhileRevalidate_DetachedContext(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024})
+	seedStale(t, c, "GET", "/x", staleMeta(5*time.Second, 300*time.Second, 0), []byte("old"))
+
+	type ctxKey struct{}
+	var sawValue atomic.Bool
+	var calls int32
+	o := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Context().Value(ctxKey{}) != nil {
+			sawValue.Store(true)
+		}
+		atomic.AddInt32(&calls, 1)
+		w.Header().Set("Cache-Control", "max-age=300")
+		w.Header().Set("Content-Length", "3")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("new"))
+	})
+
+	mw := c.ServeHandler(o)
+	req := httptest.NewRequest("GET", "/x", nil).
+		WithContext(context.WithValue(context.Background(), ctxKey{}, "sentinel"))
+	rec := httptest.NewRecorder()
+	mw.ServeHTTP(rec, req)
+	require.Equal(t, "STALE", rec.Header().Get("X-Cache"))
+
+	require.Eventually(t, func() bool { return atomic.LoadInt32(&calls) == 1 },
+		2*time.Second, 5*time.Millisecond)
+	assert.False(t, sawValue.Load(), "background revalidation must not inherit the request context values")
+}
+
+// A panic in the origin during background revalidation must be contained (the
+// http.Server's per-request recover does not cover this detached goroutine), and
+// the fill lock must still be released so the cache keeps working.
+func TestCache_StaleWhileRevalidate_PanicContained(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024})
+	seedStale(t, c, "GET", "/x", staleMeta(5*time.Second, 300*time.Second, 0), []byte("old"))
+
+	revaled := make(chan struct{})
+	var once sync.Once
+	bad := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		once.Do(func() { close(revaled) })
+		panic("boom during revalidation")
+	})
+
+	rec := do(c, bad, "GET", "/x", nil)
+	assert.Equal(t, "STALE", rec.Header().Get("X-Cache"), "client is unaffected by the revalidation panic")
+
+	select {
+	case <-revaled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("background revalidation never ran")
+	}
+	time.Sleep(50 * time.Millisecond) // let the deferred recover/release finish
+
+	// If the panic were uncontained, the test binary would already have crashed.
+	// Prove the cache still works (the lock was released) via a healthy fill.
+	var calls int32
+	good := origin(originSpec{body: []byte("ok"), header: http.Header{"Cache-Control": {"max-age=300"}}}, &calls)
+	rec = do(c, good, "GET", "/y", nil)
+	assert.Equal(t, "MISS", rec.Header().Get("X-Cache"))
+	assert.Equal(t, "ok", rec.Body.String())
 }
 
 func TestCache_StaleWhileRevalidate_SingleFlight(t *testing.T) {

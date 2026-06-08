@@ -68,12 +68,22 @@ func (c *Cache) revalidate(r *http.Request, next http.Handler, primaryHex string
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), c.revalidateTimeout)
+	// Detach from the request entirely: a fresh context, NOT WithoutCancel of
+	// r.Context(). The background fetch outlives the client request and runs
+	// concurrently with its teardown, so it must not share request-scoped mutable
+	// state — e.g. the logger's per-request record, which the original request is
+	// finalizing as this goroutine writes to it. It also must not pollute that
+	// request's log/trace with the revalidation's own fields.
+	ctx, cancel := context.WithTimeout(context.Background(), c.revalidateTimeout)
 	rr := r.Clone(ctx)
 	rr.Body = http.NoBody // GET/HEAD carry no body; never touch the original
 
 	go func() {
 		defer cancel()
+		// This goroutine runs outside the http.Server's per-request recover, so a
+		// panic in next would crash the process. Contain it: a failed refresh just
+		// leaves the stale entry for the next request to retry.
+		defer func() { _ = recover() }()
 		defer c.release(variantHex, lock)
 
 		// lock is left nil on the teeWriter so DecoupleFill never engages: there is
