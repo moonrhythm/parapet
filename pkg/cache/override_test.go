@@ -215,6 +215,28 @@ func TestCache_Override_ResponseAware(t *testing.T) {
 	assert.Equal(t, "MISS", do(c, miss, "GET", "/c.png", nil).Header().Get("X-Cache"))
 }
 
+// The hook gets a copy of the response headers: mutating them must not reach the
+// stored or served response (matching Storage.Get / InvalidatedAfter's
+// independent-copy contract).
+func TestCache_Override_HookCannotMutateResponse(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{
+		MaxFileSize: 1024,
+		Override: func(_ *http.Request, _ int, header http.Header) *Override {
+			header.Set("X-Injected", "evil") // must not affect the response
+			return &Override{TTL: time.Hour}
+		},
+	})
+	o := origin(originSpec{body: []byte("x"), header: http.Header{"Content-Type": {"text/plain"}}}, new(int32))
+
+	rec := do(c, o, "GET", "/x", nil)
+	assert.Equal(t, "MISS", rec.Header().Get("X-Cache"))
+	assert.Empty(t, rec.Header().Get("X-Injected"), "hook mutation must not reach the MISS response")
+
+	rec = do(c, o, "GET", "/x", nil)
+	assert.Equal(t, "HIT", rec.Header().Get("X-Cache"))
+	assert.Empty(t, rec.Header().Get("X-Injected"), "hook mutation must not reach the stored entry")
+}
+
 // Balanced overrides the origin's no-cache, but the client still sees the
 // origin's header (the override is private to the cache).
 func TestCache_Override_OverridesNoCacheKeepsHeader(t *testing.T) {

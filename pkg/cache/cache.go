@@ -62,8 +62,8 @@ type Options struct {
 	// and the origin's response status and headers (before the body), so the
 	// decision can key on anything in the request (host, path, extension) AND the
 	// response (Content-Type, Content-Length, status). Return nil to honor the
-	// origin for that response (the default). status and header are read-only —
-	// they are the live response; do not mutate them.
+	// origin for that response (the default). header is a copy of the response
+	// headers, so reading it is safe and mutating it has no effect.
 	//
 	// The forced policy is baked into the stored entry only, so the served
 	// Cache-Control stays the origin's and does not propagate downstream. How far
@@ -71,8 +71,9 @@ type Options struct {
 	// (see Override) still apply.
 	//
 	// It runs on every fill, including background stale-while-revalidate refreshes,
-	// so make it a deterministic function of its inputs (don't key on wall-clock or
-	// random state). Changing the hook does not re-policy already-stored entries.
+	// and is re-evaluated against the fresh response each time (so a response-shape
+	// change can change the policy). Don't key on wall-clock or random state.
+	// Changing the hook does not re-policy already-stored entries.
 	//
 	// Forcing trusts you to target cacheable paths: the cache key ignores the
 	// request's Cookie/Authorization, so do not force per-user paths (see the
@@ -252,12 +253,15 @@ func New(storage Storage, opts Options) *Cache {
 
 // overrideFor returns the forced caching policy for the request and its origin
 // response, or nil to honor the origin. A nil hook, a nil result, or a
-// non-positive TTL all mean "don't force".
+// non-positive TTL all mean "don't force". The hook receives a COPY of the
+// response headers (only allocated when a hook is set), so it cannot mutate the
+// live response — matching the independent-copy contract of Storage.Get and the
+// InvalidatedAfter hook.
 func (c *Cache) overrideFor(r *http.Request, status int, header http.Header) *Override {
 	if c.override == nil {
 		return nil
 	}
-	ov := c.override(r, status, header)
+	ov := c.override(r, status, header.Clone())
 	if ov == nil || ov.TTL <= 0 {
 		return nil
 	}
