@@ -309,7 +309,7 @@ cache.New(store, cache.Options{
 | `OverrideConservative` | only *missing* freshness | everything the origin says (`no-cache`/`no-store`/`private`/`max-age` all honored) |
 | `OverrideAggressive` | almost everything, incl. `no-store`/`private`/`Authorization` | `Set-Cookie`, `Vary: *`, non-cacheable status, oversize |
 
-> ⚠️ `OverrideAggressive` bypasses the `Authorization` gate. Because the cache key ignores `Authorization`, one user's authenticated response can be stored and served to other (including unauthenticated) users. Use it only on endpoints with no per-user/secret data, or where the origin sends `Vary: Authorization`.
+> ⚠️ Forcing trusts you to target cacheable paths. The cache key ignores the request's `Cookie` and `Authorization`, so **don't force per-user paths**: even `OverrideBalanced` will cross-user-leak a response gated by a session `Cookie` when the origin sends no `Set-Cookie`/`private`/`no-store`. `OverrideAggressive` additionally bypasses the `Authorization` gate. Scope the hook to known-public paths (or use `Options.Cacheable`).
 
 `Override.StaleWhileRevalidate` / `StaleIfError` force the RFC 5861 windows too (see below). For an unconditional default instead of a per-request hook, use `Options.DefaultStaleWhileRevalidate` / `DefaultStaleIfError`.
 

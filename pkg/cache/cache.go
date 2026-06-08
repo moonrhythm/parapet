@@ -68,6 +68,11 @@ type Options struct {
 	// It runs on every fill, including background stale-while-revalidate refreshes,
 	// so make it a deterministic function of the request (don't key on wall-clock
 	// or random state). Changing the hook does not re-policy already-stored entries.
+	//
+	// Forcing trusts you to target cacheable paths: the cache key ignores the
+	// request's Cookie/Authorization, so do not force per-user paths (see the
+	// per-mode safety notes on OverrideMode). Cacheable returning false takes
+	// precedence — an excluded request is never forced.
 	Override func(r *http.Request) *Override
 
 	// MaxFileSize caps a cacheable response's body. A GET response larger than
@@ -135,8 +140,14 @@ const (
 	// OverrideBalanced forces freshness and overrides no-cache / max-age /
 	// Expires, but still refuses a response that is unsafe to share: no-store,
 	// private, Set-Cookie, Vary: *, a non-cacheable status, an oversize body, or
-	// an Authorization-bearing request without a shared opt-in. Good for static
-	// assets; cannot accidentally cache per-user or no-store content.
+	// an Authorization-bearing request without a shared opt-in.
+	//
+	// It does NOT inspect the request's Cookie header, and the cache key ignores
+	// Cookie. So a per-user response gated by a session cookie — with none of the
+	// markers above (no Set-Cookie/private/no-store, no Authorization) — would be
+	// force-cached and served to other users. Only target paths you know are not
+	// per-user (scope the Override hook, or use Options.Cacheable). Good for static
+	// assets.
 	OverrideBalanced OverrideMode = iota
 
 	// OverrideConservative only fills freshness when the origin declares none and

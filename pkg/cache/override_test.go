@@ -127,6 +127,23 @@ func TestCache_Override_BalancedAuthGate(t *testing.T) {
 	assert.Equal(t, "HIT", do(c, pub, "GET", "/y", authed).Header().Get("X-Cache"))
 }
 
+// OverrideBalanced does not inspect the request Cookie (and the key ignores it):
+// a session-cookie-gated response with no per-user *response* markers is cached
+// and served across users. This documents why forcing must target non-per-user
+// paths — the Authorization gate alone does not make Balanced safe.
+func TestCache_Override_BalancedIgnoresRequestCookie(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{
+		MaxFileSize: 1024,
+		Override:    func(_ *http.Request) *Override { return &Override{TTL: time.Hour} },
+	})
+	o := origin(originSpec{body: []byte("user-a-data")}, new(int32)) // no Set-Cookie/private/no-store
+
+	assert.Equal(t, "MISS", do(c, o, "GET", "/me", http.Header{"Cookie": {"session=a"}}).Header().Get("X-Cache"))
+	rec := do(c, o, "GET", "/me", http.Header{"Cookie": {"session=b"}}) // a different user
+	assert.Equal(t, "HIT", rec.Header().Get("X-Cache"))
+	assert.Equal(t, "user-a-data", rec.Body.String())
+}
+
 // OverrideAggressive intentionally bypasses the Authorization gate: a response to
 // an authed request is keyed without the credential and served to other users.
 // This codifies the documented footgun (use only on non-sensitive endpoints).
