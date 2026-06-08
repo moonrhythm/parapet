@@ -22,6 +22,9 @@ import "github.com/moonrhythm/parapet/pkg/cache"
 // purge and a later fill's commit. The table's memory is instead bounded by the
 // monotonic, over-invalidating cap-fold (WithMaxRecords).
 func (t *Table) Reap(storage cache.Storage) int {
+	if !t.active.Load() {
+		return 0 // no purge ever issued: nothing can be invalidated, skip the scan
+	}
 	var reaped int
 	storage.Range(func(key string, m cache.Meta) bool {
 		if m.Created <= t.InvalidatedAfterMeta(m) {

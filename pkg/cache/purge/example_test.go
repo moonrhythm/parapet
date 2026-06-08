@@ -25,8 +25,10 @@ func ExampleTable() {
 
 	// Optionally reclaim invalidated bytes proactively (correctness doesn't depend
 	// on it — the lookup gate already prevents serving a purged entry).
+	ticker := time.NewTicker(5 * time.Minute)
 	go func() {
-		for range time.Tick(5 * time.Minute) {
+		defer ticker.Stop()
+		for range ticker.C {
 			pt.Reap(store)
 		}
 	}()
