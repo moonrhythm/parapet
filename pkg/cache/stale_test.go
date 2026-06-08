@@ -334,6 +334,86 @@ func TestCache_InvalidatedAfter_NotCalledOnExpired(t *testing.T) {
 	assert.Equal(t, int32(0), atomic.LoadInt32(&hookCalls), "hook must not run on a time-expired entry")
 }
 
+// storedMeta returns the Meta the cache stored for (method, target).
+func storedMeta(t *testing.T, c *Cache, method, target string) (Meta, bool) {
+	t.Helper()
+	req := httptest.NewRequest(method, target, nil)
+	m, _, ok := c.storage.Get(c.variantHash(c.primaryHash(req), req))
+	return m, ok
+}
+
+func TestCache_DefaultStaleWindows(t *testing.T) {
+	t.Run("applied when origin omits them, and not leaked to the client", func(t *testing.T) {
+		c := New(NewMemory(1<<20), Options{
+			MaxFileSize:                 1024,
+			DefaultStaleWhileRevalidate: 300 * time.Second,
+			DefaultStaleIfError:         600 * time.Second,
+		})
+		o := origin(originSpec{body: []byte("hi"), header: http.Header{"Cache-Control": {"max-age=60"}}}, new(int32))
+
+		rec := do(c, o, "GET", "/x", nil)
+		require.Equal(t, "MISS", rec.Header().Get("X-Cache"))
+		assert.Equal(t, "max-age=60", rec.Header().Get("Cache-Control"), "forced windows must not appear in the served header")
+
+		m, ok := storedMeta(t, c, "GET", "/x")
+		require.True(t, ok)
+		assert.Equal(t, int64(300*time.Second), m.StaleWhileRevalidate)
+		assert.Equal(t, int64(600*time.Second), m.StaleIfError)
+
+		rec = do(c, o, "GET", "/x", nil)
+		require.Equal(t, "HIT", rec.Header().Get("X-Cache"))
+		assert.Equal(t, "max-age=60", rec.Header().Get("Cache-Control"))
+	})
+
+	t.Run("explicit origin directive wins", func(t *testing.T) {
+		c := New(NewMemory(1<<20), Options{MaxFileSize: 1024, DefaultStaleWhileRevalidate: 300 * time.Second})
+		o := origin(originSpec{body: []byte("hi"), header: http.Header{"Cache-Control": {"max-age=60, stale-while-revalidate=10"}}}, new(int32))
+
+		do(c, o, "GET", "/x", nil)
+		m, ok := storedMeta(t, c, "GET", "/x")
+		require.True(t, ok)
+		assert.Equal(t, int64(10*time.Second), m.StaleWhileRevalidate, "origin's window wins over the default")
+	})
+
+	t.Run("must-revalidate suppresses the default", func(t *testing.T) {
+		c := New(NewMemory(1<<20), Options{
+			MaxFileSize:                 1024,
+			DefaultStaleWhileRevalidate: 300 * time.Second,
+			DefaultStaleIfError:         600 * time.Second,
+		})
+		o := origin(originSpec{body: []byte("hi"), header: http.Header{"Cache-Control": {"max-age=60, must-revalidate"}}}, new(int32))
+
+		do(c, o, "GET", "/x", nil)
+		m, ok := storedMeta(t, c, "GET", "/x")
+		require.True(t, ok)
+		assert.Zero(t, m.StaleWhileRevalidate)
+		assert.Zero(t, m.StaleIfError)
+	})
+}
+
+// End-to-end: a default stale-if-error window (origin sends none) drives the
+// serve-stale-on-error behavior.
+func TestCache_DefaultStaleIfError_ServesStaleOnError(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024, DefaultStaleIfError: 300 * time.Second})
+
+	fill := origin(originSpec{body: []byte("old"), header: http.Header{"Cache-Control": {"max-age=60"}}}, new(int32))
+	do(c, fill, "GET", "/x", nil) // MISS, stored with the default SIE window
+
+	// Age the stored entry into staleness (keep its windows) without waiting.
+	req := httptest.NewRequest("GET", "/x", nil)
+	key := c.variantHash(c.primaryHash(req), req)
+	m, body, ok := c.storage.Get(key)
+	require.True(t, ok)
+	require.Equal(t, int64(300*time.Second), m.StaleIfError)
+	m.FreshUntil = time.Now().Add(-5 * time.Second).UnixNano()
+	storePut(t, c.storage, key, m, body)
+
+	bad := origin(originSpec{status: http.StatusInternalServerError, body: []byte("boom")}, new(int32))
+	rec := do(c, bad, "GET", "/x", nil)
+	assert.Equal(t, "STALE", rec.Header().Get("X-Cache"))
+	assert.Equal(t, "old", rec.Body.String())
+}
+
 func TestPolicy_StaleWindows(t *testing.T) {
 	now := time.Now()
 	h := func(cc string) http.Header {

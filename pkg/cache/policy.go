@@ -52,6 +52,9 @@ type decision struct {
 	staleWhileRevalidate time.Duration
 	staleIfError         time.Duration
 	cacheable            bool
+	// noStale reports that the response forbids serving stale (must-revalidate /
+	// proxy-revalidate), so operator-configured default windows must not apply.
+	noStale bool
 }
 
 // decide applies the honor-origin policy to an origin response. method is the
@@ -105,8 +108,9 @@ func decide(method string, status int, h http.Header, reqAuthorized bool, maxFil
 			return no
 		}
 	}
+	noStale := cc.mustRevalidate || cc.proxyRevalidate
 	swr, sie := staleWindows(cc)
-	return decision{cacheable: true, freshUntil: now.Add(ttl), vary: vary, staleWhileRevalidate: swr, staleIfError: sie}
+	return decision{cacheable: true, freshUntil: now.Add(ttl), vary: vary, staleWhileRevalidate: swr, staleIfError: sie, noStale: noStale}
 }
 
 // staleWindows derives the RFC 5861 stale-serving windows from the response
@@ -117,14 +121,20 @@ func staleWindows(cc cacheControl) (swr, sie time.Duration) {
 	if cc.mustRevalidate || cc.proxyRevalidate {
 		return 0, 0
 	}
-	clamp := func(seconds int64) time.Duration {
-		d := time.Duration(seconds) * time.Second
-		if d > maxTTL {
-			d = maxTTL
-		}
-		return d
+	return clampStaleWindow(time.Duration(cc.staleWhileRevalidate) * time.Second),
+		clampStaleWindow(time.Duration(cc.staleIfError) * time.Second)
+}
+
+// clampStaleWindow bounds a stale window to [0, maxTTL] so FreshUntil+window
+// stays within time.UnixNano's range; a negative duration is dropped to zero.
+func clampStaleWindow(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
 	}
-	return clamp(cc.staleWhileRevalidate), clamp(cc.staleIfError)
+	if d > maxTTL {
+		return maxTTL
+	}
+	return d
 }
 
 // parseVary returns the lowercased, de-duplicated Vary header names and whether

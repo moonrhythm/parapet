@@ -79,6 +79,17 @@ func (tw *teeWriter) WriteHeader(code int) {
 			tw.freshUntil = dec.freshUntil
 			tw.swr = dec.staleWhileRevalidate
 			tw.sie = dec.staleIfError
+			// Apply operator-configured default windows where the origin gave none
+			// (unless the response forbids stale serving). These live only in Meta,
+			// so the served Cache-Control stays the origin's.
+			if !dec.noStale {
+				if tw.swr == 0 {
+					tw.swr = tw.c.defaultSWR
+				}
+				if tw.sie == 0 {
+					tw.sie = tw.c.defaultSIE
+				}
+			}
 			tw.metaHeader = sanitizeHeader(h)
 			if cl, ok := contentLength(h); ok {
 				tw.hasCL = true

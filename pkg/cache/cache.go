@@ -77,6 +77,18 @@ type Options struct {
 	// not apply to a normal (foreground) fill. Defaults to 30s when <= 0.
 	RevalidateTimeout time.Duration
 
+	// DefaultStaleWhileRevalidate and DefaultStaleIfError force RFC 5861 stale
+	// serving for a cacheable response that does not carry the matching directive,
+	// so an origin you don't control still gets stale-while-revalidate /
+	// stale-if-error behavior. An explicit directive on the response wins; a
+	// response marked must-revalidate / proxy-revalidate is never served stale,
+	// regardless of these. Unlike injecting the directive with a headers
+	// middleware, these stay private to this cache: the served Cache-Control is
+	// the origin's, so the policy does not propagate to downstream clients/caches.
+	// Zero (the default) forces nothing. Each is clamped to ~10y.
+	DefaultStaleWhileRevalidate time.Duration
+	DefaultStaleIfError         time.Duration
+
 	// DecoupleFill, when true, stops a slow leader client (or a slow disk) from
 	// holding the fill lock — and thus stalling waiting followers — while its response
 	// streams to that client. It engages only when the fill is CONTENDED, i.e. at
@@ -112,6 +124,8 @@ type Cache struct {
 	maxFileSize       int64
 	lockTimeout       time.Duration
 	revalidateTimeout time.Duration
+	defaultSWR        time.Duration // Options.DefaultStaleWhileRevalidate, clamped
+	defaultSIE        time.Duration // Options.DefaultStaleIfError, clamped
 	decoupleFill      bool
 
 	pvMu sync.RWMutex
@@ -148,6 +162,8 @@ func New(storage Storage, opts Options) *Cache {
 		maxFileSize:       mfs,
 		lockTimeout:       lt,
 		revalidateTimeout: rt,
+		defaultSWR:        clampStaleWindow(opts.DefaultStaleWhileRevalidate),
+		defaultSIE:        clampStaleWindow(opts.DefaultStaleIfError),
 		invalidatedAfter:  opts.InvalidatedAfter,
 		cacheable:         opts.Cacheable,
 		decoupleFill:      opts.DecoupleFill,

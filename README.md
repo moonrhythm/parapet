@@ -290,6 +290,23 @@ When the origin sets `Cache-Control: stale-while-revalidate=<s>` or `stale-if-er
 
 `must-revalidate`/`proxy-revalidate` suppress both. The client's request `Cache-Control` is ignored (only the origin's response directives are honored), consistent with the rest of the cache. Note that an entry offering these windows is retained in storage until it is past the larger window (not just past freshness), so stale-if-error still has something to fall back to — total size remains bounded by the backend's LRU cap.
 
+**Forcing stale serving for an origin you don't control.** Set `Options.DefaultStaleWhileRevalidate` / `Options.DefaultStaleIfError` to apply a window to any cacheable response that doesn't carry the directive itself. An explicit directive on the response still wins, and `must-revalidate`/`proxy-revalidate` still suppress it. These stay **private to this cache** — the served `Cache-Control` remains the origin's, so the policy doesn't propagate to downstream clients or caches.
+
+```go
+cache.New(store, cache.Options{
+    DefaultStaleWhileRevalidate: 30 * time.Second,
+    DefaultStaleIfError:         24 * time.Hour,
+})
+```
+
+Alternatively, inject the directive with a `headers` middleware mounted **below** the cache (so the cache sees it on the response). The cache parses every `Cache-Control` header, so this adds the windows without clobbering the origin's `max-age` — but unlike the options above, the injected directive **is** served to clients:
+
+```go
+h.Use(cache.New(store, cache.Options{}))                                       // outer
+h.Use(headers.AddResponse("Cache-Control", "stale-while-revalidate=30"))       // below the cache
+h.Use(upstream.SingleHost("origin...", &upstream.HTTPTransport{}))             // inner
+```
+
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.
