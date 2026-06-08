@@ -23,8 +23,9 @@ var (
 type Upstream struct {
 	Transport     http.RoundTripper
 	ErrorLog      *log.Logger
-	Host          string // override host
-	Path          string // target prefix path
+	OnRoundTrip   RoundTripFunc // observe each origin round-trip (nil disables); see prom.Upstream
+	Host          string        // override host
+	Path          string        // target prefix path
 	Retries       int
 	BackoffFactor time.Duration
 }
@@ -119,8 +120,18 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 
 // RoundTrip wraps transport round-trip
 func (m *Upstream) RoundTrip(r *http.Request) (*http.Response, error) {
+	start := time.Now()
 	resp, err := m.Transport.RoundTrip(r)
 	logger.Set(r.Context(), "upstream", r.URL.Host)
+	if m.OnRoundTrip != nil {
+		// r.URL.Host is the target the load balancer / single-host transport just
+		// resolved; Duration is the time to response headers, before the body streams.
+		info := RoundTripInfo{Host: r.URL.Host, Duration: time.Since(start), Err: err}
+		if resp != nil {
+			info.Status = resp.StatusCode
+		}
+		m.OnRoundTrip(r, info)
+	}
 	return resp, err
 }
 
