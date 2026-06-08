@@ -56,6 +56,7 @@ Each subdirectory under `pkg/` is a self-contained middleware or feature:
 | `router` | URL routing. |
 | `fileserver` | Static file serving. |
 | `authn` | Authentication helpers (JWT, basic auth). |
+| `proxyprotocol` | HAProxy PROXY protocol (v1/v2) reader; rewrites conn `RemoteAddr` to the real client behind an L4 LB. Wired via `Server.ModifyConnection`. |
 | `gcp` / `stackdriver` / `trace` | Google Cloud integration and distributed tracing (OpenCensus/OpenTelemetry). |
 
 ### Middleware composition pattern

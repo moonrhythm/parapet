@@ -56,6 +56,7 @@ Each subdirectory under `pkg/` is a self-contained middleware:
 | [`authn`](pkg/authn) | JWT and basic-auth helpers |
 | [`waf`](pkg/waf) | Web application firewall driven by CEL expressions, hot reloadable |
 | [`prom`](pkg/prom) | Prometheus metrics |
+| [`proxyprotocol`](pkg/proxyprotocol) | HAProxy PROXY protocol (v1/v2) — recover the real client IP behind an L4 load balancer |
 | [`h2push`](pkg/h2push) | HTTP/2 server push helpers |
 | [`gcp`](pkg/gcp), [`gcs`](pkg/gcs), [`stackdriver`](pkg/stackdriver), [`trace`](pkg/trace) | Google Cloud integrations and distributed tracing |
 
@@ -283,6 +284,30 @@ s.Use(h)
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.
+
+## PROXY protocol
+
+An L4 load balancer (AWS NLB, HAProxy in TCP mode, …) terminates the TCP
+connection, so without help the proxy sees the balancer's IP, not the client's —
+and an L4 balancer adds no `X-Forwarded-For`. The [`proxyprotocol`](pkg/proxyprotocol)
+package reads the HAProxy **PROXY protocol** header (v1 and v2) that such
+balancers prepend and rewrites the connection's `RemoteAddr` to the real client,
+so `ratelimit`, `waf`, `logger`, and the trust logic above all see the right
+address. Mount it with `Server.ModifyConnection`; the header is parsed lazily on
+the connection's first read, off the accept loop.
+
+```go
+// Only the listed CIDRs (your load balancer) may set a client address; a direct
+// connection from outside them is passed through untouched and cannot spoof one.
+pp := proxyprotocol.New("10.0.0.0/8")
+
+s := parapet.NewFrontend()
+s.ModifyConnection(pp.ModifyConnection)
+```
+
+Set `Require` to reject a trusted connection that arrives without a PROXY header
+(use it when every connection from the balancer is guaranteed to carry one); by
+default such a connection is served with its real peer address.
 
 ## Performance tuning
 
