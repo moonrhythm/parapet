@@ -3,6 +3,7 @@ package cache
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -112,7 +113,7 @@ func TestDecideForced(t *testing.T) {
 func TestCache_Override_BalancedAuthGate(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request) *Override { return &Override{TTL: time.Hour} },
+		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return &Override{TTL: time.Hour} },
 	})
 	authed := http.Header{"Authorization": {"Bearer x"}}
 
@@ -134,7 +135,7 @@ func TestCache_Override_BalancedAuthGate(t *testing.T) {
 func TestCache_Override_BalancedIgnoresRequestCookie(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request) *Override { return &Override{TTL: time.Hour} },
+		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return &Override{TTL: time.Hour} },
 	})
 	o := origin(originSpec{body: []byte("user-a-data")}, new(int32)) // no Set-Cookie/private/no-store
 
@@ -150,7 +151,7 @@ func TestCache_Override_BalancedIgnoresRequestCookie(t *testing.T) {
 func TestCache_Override_AggressiveCachesAcrossUsers(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request) *Override { return &Override{TTL: time.Hour, Mode: OverrideAggressive} },
+		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return &Override{TTL: time.Hour, Mode: OverrideAggressive} },
 	})
 	o := origin(originSpec{body: []byte("user-data")}, new(int32))
 
@@ -165,7 +166,7 @@ func TestCache_Override_AggressiveCachesAcrossUsers(t *testing.T) {
 func TestCache_Override_PerHost(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override: func(r *http.Request) *Override {
+		Override: func(r *http.Request, _ int, _ http.Header) *Override {
 			if r.Host == "a.example.com" {
 				return &Override{TTL: time.Hour}
 			}
@@ -185,12 +186,41 @@ func TestCache_Override_PerHost(t *testing.T) {
 	assert.Equal(t, "MISS", do(c, o, "GET", "http://b.example.com/app.js", nil).Header().Get("X-Cache"))
 }
 
+// The Override hook can decide using the origin's response: force only
+// successful image responses.
+func TestCache_Override_ResponseAware(t *testing.T) {
+	c := New(NewMemory(1<<20), Options{
+		MaxFileSize: 1 << 20,
+		Override: func(_ *http.Request, status int, header http.Header) *Override {
+			if status == http.StatusOK && strings.HasPrefix(header.Get("Content-Type"), "image/") {
+				return &Override{TTL: time.Hour}
+			}
+			return nil
+		},
+	})
+
+	// image/png 200 -> forced, cached.
+	img := origin(originSpec{body: []byte("PNG"), header: http.Header{"Content-Type": {"image/png"}}}, new(int32))
+	assert.Equal(t, "MISS", do(c, img, "GET", "/a.png", nil).Header().Get("X-Cache"))
+	assert.Equal(t, "HIT", do(c, img, "GET", "/a.png", nil).Header().Get("X-Cache"))
+
+	// text/html 200 -> not forced (origin gave no freshness), not cached.
+	html := origin(originSpec{body: []byte("<html>"), header: http.Header{"Content-Type": {"text/html"}}}, new(int32))
+	assert.Equal(t, "MISS", do(c, html, "GET", "/b.html", nil).Header().Get("X-Cache"))
+	assert.Equal(t, "MISS", do(c, html, "GET", "/b.html", nil).Header().Get("X-Cache"))
+
+	// image/* but a 404 -> hook requires 200, so honor origin (no freshness) -> not cached.
+	miss := origin(originSpec{status: http.StatusNotFound, body: []byte("no"), header: http.Header{"Content-Type": {"image/png"}}}, new(int32))
+	assert.Equal(t, "MISS", do(c, miss, "GET", "/c.png", nil).Header().Get("X-Cache"))
+	assert.Equal(t, "MISS", do(c, miss, "GET", "/c.png", nil).Header().Get("X-Cache"))
+}
+
 // Balanced overrides the origin's no-cache, but the client still sees the
 // origin's header (the override is private to the cache).
 func TestCache_Override_OverridesNoCacheKeepsHeader(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request) *Override { return &Override{TTL: time.Hour} },
+		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return &Override{TTL: time.Hour} },
 	})
 	o := origin(originSpec{body: []byte("x"), header: http.Header{"Cache-Control": {"no-cache"}}}, new(int32))
 
@@ -204,7 +234,7 @@ func TestCache_Override_OverridesNoCacheKeepsHeader(t *testing.T) {
 func TestCache_Override_NilHonorsOrigin(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request) *Override { return nil },
+		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return nil },
 	})
 	o := origin(originSpec{body: []byte("x")}, new(int32)) // no freshness
 
@@ -216,7 +246,7 @@ func TestCache_Override_NilHonorsOrigin(t *testing.T) {
 func TestCache_Override_ForcedStaleIfError(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request) *Override { return &Override{TTL: time.Hour, StaleIfError: time.Hour} },
+		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return &Override{TTL: time.Hour, StaleIfError: time.Hour} },
 	})
 	do(c, origin(originSpec{body: []byte("old")}, new(int32)), "GET", "/x", nil) // fill (forced)
 

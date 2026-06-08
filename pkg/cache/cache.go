@@ -56,24 +56,29 @@ type Options struct {
 	// vector — see the package doc). nil caches everything otherwise cacheable.
 	Cacheable func(r *http.Request) bool
 
-	// Override, when non-nil, is called for each GET/HEAD request and may return a
-	// forced caching policy that overrides the origin's Cache-Control — letting you
-	// cache an origin that sends no (or unwanted) cache headers, keyed on anything
-	// in the request (host, path, extension). Return nil to honor the origin for
-	// that request (the default). The forced policy is baked into the stored entry
-	// only, so the served Cache-Control stays the origin's and does not propagate
-	// downstream. How far the override reaches is set per request by Override.Mode;
-	// safety refusals (see Override) still apply.
+	// Override, when non-nil, may return a forced caching policy that overrides the
+	// origin's Cache-Control — letting you cache an origin that sends no (or
+	// unwanted) cache headers. It is called on each GET/HEAD fill with the request
+	// and the origin's response status and headers (before the body), so the
+	// decision can key on anything in the request (host, path, extension) AND the
+	// response (Content-Type, Content-Length, status). Return nil to honor the
+	// origin for that response (the default). status and header are read-only —
+	// they are the live response; do not mutate them.
+	//
+	// The forced policy is baked into the stored entry only, so the served
+	// Cache-Control stays the origin's and does not propagate downstream. How far
+	// the override reaches is set per request by Override.Mode; safety refusals
+	// (see Override) still apply.
 	//
 	// It runs on every fill, including background stale-while-revalidate refreshes,
-	// so make it a deterministic function of the request (don't key on wall-clock
-	// or random state). Changing the hook does not re-policy already-stored entries.
+	// so make it a deterministic function of its inputs (don't key on wall-clock or
+	// random state). Changing the hook does not re-policy already-stored entries.
 	//
 	// Forcing trusts you to target cacheable paths: the cache key ignores the
 	// request's Cookie/Authorization, so do not force per-user paths (see the
 	// per-mode safety notes on OverrideMode). Cacheable returning false takes
 	// precedence — an excluded request is never forced.
-	Override func(r *http.Request) *Override
+	Override func(r *http.Request, status int, header http.Header) *Override
 
 	// MaxFileSize caps a cacheable response's body. A GET response larger than
 	// this (by Content-Length, or mid-stream) is not cached but still served in
@@ -190,7 +195,7 @@ type Cache struct {
 	storage          Storage
 	invalidatedAfter func(r *http.Request, m Meta) int64
 	cacheable        func(r *http.Request) bool
-	override         func(r *http.Request) *Override
+	override         func(r *http.Request, status int, header http.Header) *Override
 	primaryVary      map[string][]string  // primaryHex -> Vary header names learned from a stored response
 	locks            map[string]*fillLock // variantHex -> in-flight fill
 	maxFileSize       int64
@@ -245,13 +250,14 @@ func New(storage Storage, opts Options) *Cache {
 	}
 }
 
-// overrideFor returns the forced caching policy for r, or nil to honor the
-// origin. A nil hook, a nil result, or a non-positive TTL all mean "don't force".
-func (c *Cache) overrideFor(r *http.Request) *Override {
+// overrideFor returns the forced caching policy for the request and its origin
+// response, or nil to honor the origin. A nil hook, a nil result, or a
+// non-positive TTL all mean "don't force".
+func (c *Cache) overrideFor(r *http.Request, status int, header http.Header) *Override {
 	if c.override == nil {
 		return nil
 	}
-	ov := c.override(r)
+	ov := c.override(r, status, header)
 	if ov == nil || ov.TTL <= 0 {
 		return nil
 	}

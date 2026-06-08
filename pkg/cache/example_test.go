@@ -28,18 +28,15 @@ func ExampleNew() {
 	// s.Use(upstream.SingleHost(...)) — the handler whose responses get cached.
 }
 
-// Force caching for an origin that sends no cache headers, decided per request.
+// Force caching for an origin that sends no cache headers, deciding on both the
+// request and the origin's response — here, only successful image responses.
 func ExampleOverride() {
-	static := func(p string) bool {
-		return strings.HasSuffix(p, ".js") || strings.HasSuffix(p, ".css") || strings.HasSuffix(p, ".jpg")
-	}
-
 	cache.New(cache.NewMemory(256<<20), cache.Options{
-		Override: func(r *http.Request) *cache.Override {
-			if r.Host == "static.example.com" && static(r.URL.Path) {
+		Override: func(r *http.Request, status int, header http.Header) *cache.Override {
+			if status == http.StatusOK && strings.HasPrefix(header.Get("Content-Type"), "image/") {
 				return &cache.Override{TTL: time.Hour} // OverrideBalanced by default
 			}
-			return nil // every other request: respect the origin's Cache-Control
+			return nil // everything else: respect the origin's Cache-Control
 		},
 	})
 }

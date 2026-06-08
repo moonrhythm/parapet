@@ -66,7 +66,7 @@ func (tw *teeWriter) WriteHeader(code int) {
 	reqAuthorized := tw.r.Header.Get("Authorization") != ""
 	now := time.Now()
 	var dec decision
-	if ov := tw.c.overrideFor(tw.r); ov != nil {
+	if ov := tw.c.overrideFor(tw.r, code, h); ov != nil {
 		dec = decideForced(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, now, ov)
 	} else {
 		dec = decide(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, now)

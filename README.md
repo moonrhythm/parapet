@@ -283,23 +283,26 @@ s.Use(h)
 
 ### Forcing caching for an origin you don't control
 
-`Options.Override` is a per-request hook that returns a forced caching policy, overriding the origin's `Cache-Control` — so you can cache an origin that sends no (or unwanted) cache headers, decided on anything in the request (host, path, extension). Return `nil` to honor the origin. The forced policy is baked into the **stored entry only**, so the served `Cache-Control` stays the origin's and doesn't propagate downstream.
+`Options.Override` is a hook that returns a forced caching policy, overriding the origin's `Cache-Control` — so you can cache an origin that sends no (or unwanted) cache headers. It is called on each GET/HEAD fill with the **request and the origin's response** (status + headers), so the decision can key on anything in the request (host, path, extension) *and* the response (`Content-Type`, `Content-Length`, status). Return `nil` to honor the origin. The forced policy is baked into the **stored entry only**, so the served `Cache-Control` stays the origin's and doesn't propagate downstream.
 
 ```go
 cache.New(store, cache.Options{
-    Override: func(r *http.Request) *cache.Override {
+    Override: func(r *http.Request, status int, header http.Header) *cache.Override {
         switch {
-        case strings.HasSuffix(r.URL.Path, ".js"), strings.HasSuffix(r.URL.Path, ".css"),
-            strings.HasSuffix(r.URL.Path, ".jpg"):
-            return &cache.Override{TTL: time.Hour}          // force static assets for 1h
-        case r.Host == "b.example.com":
-            return nil                                       // host B: respect upstream
+        case status != http.StatusOK:
+            return nil                                       // only force 200s
+        case strings.HasPrefix(header.Get("Content-Type"), "image/"):
+            return &cache.Override{TTL: time.Hour}           // force images for 1h
+        case r.Host == "static.example.com" && strings.HasSuffix(r.URL.Path, ".js"):
+            return &cache.Override{TTL: 24 * time.Hour}      // force this host's JS for a day
         default:
-            return nil
+            return nil                                        // everything else: respect upstream
         }
     },
 })
 ```
+
+`status` and `header` are the live origin response — read them, don't mutate them.
 
 `Override.Mode` chooses how far the force reaches over the origin's own directives — the safety trade-off is yours per request:
 
