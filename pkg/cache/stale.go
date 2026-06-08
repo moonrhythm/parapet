@@ -99,14 +99,21 @@ func (c *Cache) revalidate(r *http.Request, next http.Handler, primaryHex string
 // normal fill (so single-flight, Vary learning, and caching all apply) but routes
 // the client write through a staleGate. If the origin's revalidation produces a
 // server error (status >= 500), the gate suppresses it and the stale entry is
-// served instead.
-func (c *Cache) fillWithStale(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex string, m Meta, body []byte) {
+// served instead. It returns the request's cache outcome: ResultStaleError when it
+// fell back to the stale entry (carrying the failed fetch's duration), otherwise
+// the inner fill's own result (a MISS that successfully revalidated, or a HIT
+// served from a concurrent leader's fill through the gate).
+func (c *Cache) fillWithStale(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex string, m Meta, body []byte) ResultInfo {
 	// gate.m points at this stack-local m; finalize runs synchronously below
 	// (before this frame returns), so the pointer never escapes. fillAndServe and
 	// the teeWriter it builds keep the gate stack-local and do not retain it.
 	gate := &staleGate{rw: w, r: r, m: &m, body: body}
-	c.fillAndServe(gate, r, next, primaryHex)
+	info := c.fillAndServe(gate, r, next, primaryHex)
 	gate.finalize()
+	if gate.fellBack {
+		return ResultInfo{Result: ResultStaleError, FillDuration: info.FillDuration}
+	}
+	return info
 }
 
 // staleGate wraps the client ResponseWriter during a stale-if-error fill. It
