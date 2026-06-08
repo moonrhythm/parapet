@@ -30,9 +30,23 @@ var ErrInvalidToken = errors.New("invalid token")
 // key may be any type go-jose accepts for verification: []byte for HMAC
 // (HS256/384/512), an *rsa.PublicKey, *ecdsa.PublicKey or ed25519.PublicKey for
 // asymmetric signatures, or a *jose.JSONWebKey / *jose.JSONWebKeySet.
+//
+// To verify against a rotating remote key set instead of a static key, leave
+// key nil and set JWTAuthenticator.KeySource (see JWTFromKeySource and JWKS).
 func JWT(key any, algs ...jose.SignatureAlgorithm) *JWTAuthenticator {
 	return &JWTAuthenticator{
 		Key:        key,
+		Algorithms: algs,
+	}
+}
+
+// JWTFromKeySource creates a JWT bearer-token authentication middleware that
+// resolves its verification key from src at request time — typically a remote,
+// rotating JWKS via JWKS — instead of a fixed key. The algorithm allowlist is
+// still mandatory and enforced exactly as in JWT.
+func JWTFromKeySource(src KeySource, algs ...jose.SignatureAlgorithm) *JWTAuthenticator {
+	return &JWTAuthenticator{
+		KeySource:  src,
 		Algorithms: algs,
 	}
 }
@@ -41,8 +55,14 @@ func JWT(key any, algs ...jose.SignatureAlgorithm) *JWTAuthenticator {
 //
 //nolint:govet
 type JWTAuthenticator struct {
-	// Key verifies the token signature. See JWT for accepted types.
+	// Key verifies the token signature. See JWT for accepted types. Ignored when
+	// KeySource is set.
 	Key any
+
+	// KeySource, when set, supplies the verification key dynamically at request
+	// time (e.g. a rotating remote JWKS via JWKS) and takes precedence over Key.
+	// The token's "kid" header is passed to it so it can select or refresh keys.
+	KeySource KeySource
 
 	// Algorithms is the set of accepted signature algorithms. It is required;
 	// when empty every request is rejected.
@@ -107,12 +127,27 @@ func (m JWTAuthenticator) ServeHandler(h http.Handler) http.Handler {
 				return ErrInvalidToken
 			}
 
+			// Resolve the verification key. A KeySource (e.g. a rotating remote
+			// JWKS) takes precedence over the static Key and is handed the
+			// token's kid so it can select or refresh the right key.
+			key := m.Key
+			if m.KeySource != nil {
+				var kid string
+				if len(tok.Headers) > 0 {
+					kid = tok.Headers[0].KeyID
+				}
+				key, err = m.KeySource.VerificationKey(r.Context(), kid)
+				if err != nil {
+					return ErrInvalidToken
+				}
+			}
+
 			// Claims verifies the signature, then decodes the payload into the
 			// registered-claims struct (for validation) and a map (for
 			// downstream consumers).
 			var claims jwt.Claims
 			all := map[string]any{}
-			if err := tok.Claims(m.Key, &claims, &all); err != nil {
+			if err := tok.Claims(key, &claims, &all); err != nil {
 				return ErrInvalidToken
 			}
 

@@ -232,6 +232,31 @@ s.Use(m)
 claims, ok := authn.JWTClaimsFromContext(r.Context())
 ```
 
+### Rotating keys from a remote JWKS
+
+For tokens signed by an OIDC provider (Auth0, Okta, Google, …), verify against
+the provider's `jwks_uri` instead of a static key with `authn.JWKS`. It fetches
+the key set over HTTP and caches it, picking up signing-key **rotation** without
+a restart: a stale cache is refreshed in the background while the last good set
+keeps serving, and a token bearing an unknown `kid` triggers a single-flighted
+refetch (rate-limited so bogus `kid`s can't hammer the endpoint). Refresh
+failures are **fail-static** — once a set has been fetched, a later fetch error
+never starts rejecting valid tokens. The algorithm allowlist is still mandatory
+and enforced exactly as above.
+
+```go
+m := authn.JWTFromKeySource(
+	&authn.JWKS{URL: "https://issuer.example.com/.well-known/jwks.json"},
+	jose.RS256, // pin the accepted algorithm(s)
+)
+m.Issuer = "https://issuer.example.com"
+m.Audience = "my-api"
+s.Use(m)
+```
+
+`JWKS` exposes `RefreshInterval` (cache TTL, default 15m), `MinRefreshInterval`
+(unknown-`kid` refetch rate limit, default 1m), `Client`, and `MaxResponseBytes`.
+
 ## Response caching
 
 The [`cache`](pkg/cache) package is a CDN-style, honor-origin response cache. It caches a response **only** when the origin opts in with explicit freshness (`Cache-Control: s-maxage`/`max-age` or `Expires`); refuses `private`/`no-store`/`no-cache`, `Set-Cookie`, and `Vary: *`; honors `Vary`; serves `GET`/`HEAD` only; and ignores the client's request `Cache-Control` so a client can't bust the shared cache. Concurrent misses for one key collapse into a single origin fetch (single-flight), and it's fail-static — any storage error degrades to a miss, never an error to the client. Every response is tagged `X-Cache: HIT|MISS`.
