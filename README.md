@@ -34,7 +34,7 @@ Each subdirectory under `pkg/` is a self-contained middleware:
 
 | Package | What it does |
 |---|---|
-| [`upstream`](pkg/upstream) | Reverse proxy and load balancing (round-robin) over HTTP, H2C, or HTTPS |
+| [`upstream`](pkg/upstream) | Reverse proxy and load balancing (round-robin, or round-robin with passive health checks) over HTTP, H2C, or HTTPS |
 | [`host`](pkg/host) | Virtual-host routing on the `Host` header, with wildcard prefixes |
 | [`location`](pkg/location) | Path routing — exact, prefix, and regexp matchers |
 | [`router`](pkg/router) | Simple URL router |
@@ -360,6 +360,39 @@ go func() { for range time.Tick(5 * time.Minute) { pt.Reap(store) } }() // proac
 ```
 
 `Snapshot`/`Restore` serialize the table so purges survive a restart (persist however you like). It's the engine [parapet-ingress-controller](https://github.com/moonrhythm/parapet-ingress-controller) builds its control-plane purge distribution on top of.
+
+## Load balancing with passive health checks
+
+`upstream.NewRoundRobinLoadBalancer` spreads requests evenly but keeps routing to
+a dead backend. `upstream.NewEjectingLoadBalancer` adds passive health checking
+(outlier ejection): after a target returns `MaxFails` consecutive failures it is
+ejected from rotation for `EjectTimeout` (doubling on each repeat ejection, up to
+`MaxEjectTimeout`), then allowed back with no background probing. A single
+success clears its failure count. If every target is ejected the balancer fails
+open and keeps routing, so a transient outage cannot black-hole all traffic.
+
+```go
+lb := upstream.NewEjectingLoadBalancer([]*upstream.Target{
+	{Host: "10.0.0.1:8080", Transport: &upstream.HTTPTransport{}},
+	{Host: "10.0.0.2:8080", Transport: &upstream.HTTPTransport{}},
+})
+lb.MaxFails = 3                      // consecutive failures before ejection
+lb.EjectTimeout = 30 * time.Second   // base cooldown
+s.Use(upstream.New(lb))
+```
+
+By default only transport errors (other than a client-canceled request) count as
+failures. Set `lb.IsFailure` to also treat responses such as 5xx as failures:
+
+```go
+lb.IsFailure = func(resp *http.Response, err error) bool {
+	return err != nil || (resp != nil && resp.StatusCode >= 500)
+}
+```
+
+Pair it with `prom.Upstream()` (wired into `Upstream.OnRoundTrip`) to watch
+ejections take effect: traffic shifts off a failing backend in
+`parapet_upstream_requests{host,status}`.
 
 ## Trusted proxies
 
