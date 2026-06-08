@@ -46,7 +46,15 @@ func cacheableStatus(code int) bool {
 type decision struct {
 	freshUntil time.Time
 	vary       []string // lowercased Vary header names (nil when no Vary)
-	cacheable  bool
+	// staleWhileRevalidate and staleIfError are the RFC 5861 windows past
+	// freshUntil during which a stale entry may be served (while revalidating, or
+	// on a revalidation error). Zero when not offered.
+	staleWhileRevalidate time.Duration
+	staleIfError         time.Duration
+	cacheable            bool
+	// noStale reports that the response forbids serving stale (must-revalidate /
+	// proxy-revalidate), so operator-configured default windows must not apply.
+	noStale bool
 }
 
 // decide applies the honor-origin policy to an origin response. method is the
@@ -100,7 +108,33 @@ func decide(method string, status int, h http.Header, reqAuthorized bool, maxFil
 			return no
 		}
 	}
-	return decision{cacheable: true, freshUntil: now.Add(ttl), vary: vary}
+	noStale := cc.mustRevalidate || cc.proxyRevalidate
+	swr, sie := staleWindows(cc)
+	return decision{cacheable: true, freshUntil: now.Add(ttl), vary: vary, staleWhileRevalidate: swr, staleIfError: sie, noStale: noStale}
+}
+
+// staleWindows derives the RFC 5861 stale-serving windows from the response
+// Cache-Control. must-revalidate / proxy-revalidate forbid serving stale at all
+// (RFC 9111 §4.2.4), so they suppress both windows. Each is clamped to maxTTL so
+// FreshUntil+window stays within time.UnixNano's range.
+func staleWindows(cc cacheControl) (swr, sie time.Duration) {
+	if cc.mustRevalidate || cc.proxyRevalidate {
+		return 0, 0
+	}
+	return clampStaleWindow(time.Duration(cc.staleWhileRevalidate) * time.Second),
+		clampStaleWindow(time.Duration(cc.staleIfError) * time.Second)
+}
+
+// clampStaleWindow bounds a stale window to [0, maxTTL] so FreshUntil+window
+// stays within time.UnixNano's range; a negative duration is dropped to zero.
+func clampStaleWindow(d time.Duration) time.Duration {
+	if d < 0 {
+		return 0
+	}
+	if d > maxTTL {
+		return maxTTL
+	}
+	return d
 }
 
 // parseVary returns the lowercased, de-duplicated Vary header names and whether
@@ -127,15 +161,18 @@ func parseVary(h http.Header) (names []string, star bool) {
 }
 
 type cacheControl struct {
-	maxAge         int64
-	sMaxAge        int64
-	private        bool
-	noStore        bool
-	noCache        bool
-	public         bool
-	mustRevalidate bool
-	hasMax         bool
-	hasSMax        bool
+	maxAge               int64
+	sMaxAge              int64
+	staleWhileRevalidate int64
+	staleIfError         int64
+	private              bool
+	noStore              bool
+	noCache              bool
+	public               bool
+	mustRevalidate       bool
+	proxyRevalidate      bool
+	hasMax               bool
+	hasSMax              bool
 }
 
 // parseCacheControl parses the response Cache-Control directives the policy
@@ -162,6 +199,8 @@ func parseCacheControl(h http.Header) cacheControl {
 				cc.public = true
 			case "must-revalidate":
 				cc.mustRevalidate = true
+			case "proxy-revalidate":
+				cc.proxyRevalidate = true
 			case "max-age":
 				if n, err := strconv.ParseInt(val, 10, 64); err == nil {
 					cc.maxAge = n
@@ -171,6 +210,14 @@ func parseCacheControl(h http.Header) cacheControl {
 				if n, err := strconv.ParseInt(val, 10, 64); err == nil {
 					cc.sMaxAge = n
 					cc.hasSMax = true
+				}
+			case "stale-while-revalidate":
+				if n, err := strconv.ParseInt(val, 10, 64); err == nil && n >= 0 {
+					cc.staleWhileRevalidate = n
+				}
+			case "stale-if-error":
+				if n, err := strconv.ParseInt(val, 10, 64); err == nil && n >= 0 {
+					cc.staleIfError = n
 				}
 			}
 		}

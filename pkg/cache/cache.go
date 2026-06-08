@@ -26,6 +26,10 @@ const defaultLockTimeout = 2 * time.Second
 // defaultMaxFileSize is the per-object cap when Options.MaxFileSize <= 0.
 const defaultMaxFileSize = 8 << 20 // 8 MiB
 
+// defaultRevalidateTimeout bounds a background stale-while-revalidate fetch when
+// Options.RevalidateTimeout <= 0.
+const defaultRevalidateTimeout = 30 * time.Second
+
 // maxPrimaryVary bounds the in-memory primary->Vary map so a long-tail URL space
 // can't grow it without limit (the storage backend bounds bytes, not this map).
 // When the cap is hit the map is reset; a dropped entry just costs one re-learn
@@ -67,6 +71,24 @@ type Options struct {
 	// fast (more origin fetches under load). Defaults to 2s when <= 0.
 	LockTimeout time.Duration
 
+	// RevalidateTimeout bounds a background stale-while-revalidate fetch (RFC
+	// 5861): the detached request to the origin is cancelled after this long so a
+	// hung origin can't pin the single-flight lock or leak a goroutine. It does
+	// not apply to a normal (foreground) fill. Defaults to 30s when <= 0.
+	RevalidateTimeout time.Duration
+
+	// DefaultStaleWhileRevalidate and DefaultStaleIfError force RFC 5861 stale
+	// serving for a cacheable response that does not carry the matching directive,
+	// so an origin you don't control still gets stale-while-revalidate /
+	// stale-if-error behavior. An explicit directive on the response wins; a
+	// response marked must-revalidate / proxy-revalidate is never served stale,
+	// regardless of these. Unlike injecting the directive with a headers
+	// middleware, these stay private to this cache: the served Cache-Control is
+	// the origin's, so the policy does not propagate to downstream clients/caches.
+	// Zero (the default) forces nothing. Each is clamped to ~10y.
+	DefaultStaleWhileRevalidate time.Duration
+	DefaultStaleIfError         time.Duration
+
 	// DecoupleFill, when true, stops a slow leader client (or a slow disk) from
 	// holding the fill lock — and thus stalling waiting followers — while its response
 	// streams to that client. It engages only when the fill is CONTENDED, i.e. at
@@ -99,9 +121,12 @@ type Cache struct {
 	cacheable        func(r *http.Request) bool
 	primaryVary      map[string][]string  // primaryHex -> Vary header names learned from a stored response
 	locks            map[string]*fillLock // variantHex -> in-flight fill
-	maxFileSize      int64
-	lockTimeout      time.Duration
-	decoupleFill     bool
+	maxFileSize       int64
+	lockTimeout       time.Duration
+	revalidateTimeout time.Duration
+	defaultSWR        time.Duration // Options.DefaultStaleWhileRevalidate, clamped
+	defaultSIE        time.Duration // Options.DefaultStaleIfError, clamped
+	decoupleFill      bool
 
 	pvMu sync.RWMutex
 
@@ -128,15 +153,22 @@ func New(storage Storage, opts Options) *Cache {
 	if lt <= 0 {
 		lt = defaultLockTimeout
 	}
+	rt := opts.RevalidateTimeout
+	if rt <= 0 {
+		rt = defaultRevalidateTimeout
+	}
 	return &Cache{
-		storage:          storage,
-		maxFileSize:      mfs,
-		lockTimeout:      lt,
-		invalidatedAfter: opts.InvalidatedAfter,
-		cacheable:        opts.Cacheable,
-		decoupleFill:     opts.DecoupleFill,
-		primaryVary:      map[string][]string{},
-		locks:            map[string]*fillLock{},
+		storage:           storage,
+		maxFileSize:       mfs,
+		lockTimeout:       lt,
+		revalidateTimeout: rt,
+		defaultSWR:        clampStaleWindow(opts.DefaultStaleWhileRevalidate),
+		defaultSIE:        clampStaleWindow(opts.DefaultStaleIfError),
+		invalidatedAfter:  opts.InvalidatedAfter,
+		cacheable:         opts.Cacheable,
+		decoupleFill:      opts.DecoupleFill,
+		primaryVary:       map[string][]string{},
+		locks:             map[string]*fillLock{},
 	}
 }
 
@@ -158,34 +190,49 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, next http.Handler)
 		return
 	}
 	primaryHex := c.primaryHash(r)
-	if c.tryServeHit(w, r, c.variantHash(primaryHex, r)) {
-		return
+	key := c.variantHash(primaryHex, r)
+	if m, body, ok := c.storage.Get(key); ok {
+		switch c.classify(m, r, time.Now()) {
+		case stateFresh:
+			writeStored(w, r, m, body, "HIT")
+			return
+		case stateStaleRevalidate:
+			// RFC 5861 stale-while-revalidate: serve the stale entry now and refresh
+			// it in the background (single-flighted), so the client never waits on the
+			// origin.
+			writeStored(w, r, m, body, "STALE")
+			c.revalidate(r, next, primaryHex)
+			return
+		case stateStaleIfError:
+			// RFC 5861 stale-if-error: try the origin, but fall back to this stale
+			// entry if the revalidation returns a server error.
+			c.fillWithStale(w, r, next, primaryHex, m, body)
+			return
+		case stateExpired:
+			c.storage.Delete(key)
+		}
 	}
 	c.fillAndServe(w, r, next, primaryHex)
 }
 
-// tryServeHit serves key from storage if present and fresh, returning true. An
-// expired entry is reaped and reported as a miss (fail-static: a storage error
-// reads as a miss).
+// tryServeHit serves key from storage if present and fresh, returning true. It is
+// the follower re-read after a fill: an expired entry is reaped and reported as a
+// miss, while a stale-but-still-serveable entry (within an RFC 5861 window) is
+// kept (so stale-if-error can still fall back to it) and reported as a miss here.
+// Fail-static: a storage error reads as a miss.
 func (c *Cache) tryServeHit(w http.ResponseWriter, r *http.Request, key string) bool {
 	m, body, ok := c.storage.Get(key)
 	if !ok {
 		return false
 	}
-	if time.Now().After(time.Unix(0, m.FreshUntil)) {
+	switch c.classify(m, r, time.Now()) {
+	case stateFresh:
+		writeStored(w, r, m, body, "HIT")
+		return true
+	case stateExpired:
 		c.storage.Delete(key)
-		return false
 	}
-	// Out-of-band invalidation (cache purge): an entry created at or before the
-	// invalidation epoch is reaped and served as a miss, just like a passed
-	// FreshUntil. Checked after freshness so the common (no-purge) path is one nil
-	// compare.
-	if c.invalidatedAfter != nil && m.Created <= c.invalidatedAfter(r, m) {
-		c.storage.Delete(key)
-		return false
-	}
-	writeStored(w, r, m, body, "HIT")
-	return true
+	return false
 }
 
 // fillAndServe handles a miss with single-flight. The first arrival for a variant

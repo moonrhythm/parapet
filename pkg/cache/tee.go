@@ -39,9 +39,11 @@ type teeWriter struct {
 	method     string
 	storeKey   string
 	primaryHex string
-	vary       []string     // sorted, lowercased
-	tags       []string     // surrogate keys parsed from the response Cache-Tag header
-	leaderBuf  bytes.Buffer // DecoupleFill: the leader's own copy of the body, served after the lock is released
+	vary       []string      // sorted, lowercased
+	tags       []string      // surrogate keys parsed from the response Cache-Tag header
+	leaderBuf  bytes.Buffer  // DecoupleFill: the leader's own copy of the body, served after the lock is released
+	swr        time.Duration // RFC 5861 stale-while-revalidate window
+	sie        time.Duration // RFC 5861 stale-if-error window
 	written    int64
 	contentLen int64
 	status     int
@@ -75,6 +77,19 @@ func (tw *teeWriter) WriteHeader(code int) {
 			tw.vary = vary
 			tw.tags = parseCacheTags(h)
 			tw.freshUntil = dec.freshUntil
+			tw.swr = dec.staleWhileRevalidate
+			tw.sie = dec.staleIfError
+			// Apply operator-configured default windows where the origin gave none
+			// (unless the response forbids stale serving). These live only in Meta,
+			// so the served Cache-Control stays the origin's.
+			if !dec.noStale {
+				if tw.swr == 0 {
+					tw.swr = tw.c.defaultSWR
+				}
+				if tw.sie == 0 {
+					tw.sie = tw.c.defaultSIE
+				}
+			}
 			tw.metaHeader = sanitizeHeader(h)
 			if cl, ok := contentLength(h); ok {
 				tw.hasCL = true
@@ -166,16 +181,18 @@ func (tw *teeWriter) finish() {
 		return
 	}
 	meta := Meta{
-		Status:     tw.status,
-		Header:     tw.metaHeader,
-		PrimaryHex: tw.primaryHex,
-		Host:       normalizeHost(tw.r.Host),
-		URI:        tw.r.URL.RequestURI(),
-		Vary:       tw.vary,
-		Tags:       tw.tags,
-		Created:    time.Now().UnixNano(),
-		FreshUntil: tw.freshUntil.UnixNano(),
-		Size:       tw.written,
+		Status:               tw.status,
+		Header:               tw.metaHeader,
+		PrimaryHex:           tw.primaryHex,
+		Host:                 normalizeHost(tw.r.Host),
+		URI:                  tw.r.URL.RequestURI(),
+		Vary:                 tw.vary,
+		Tags:                 tw.tags,
+		Created:              time.Now().UnixNano(),
+		FreshUntil:           tw.freshUntil.UnixNano(),
+		StaleWhileRevalidate: int64(tw.swr),
+		StaleIfError:         int64(tw.sie),
+		Size:                 tw.written,
 	}
 	if err := tw.ew.Commit(meta); err == nil {
 		tw.c.setPrimaryVary(tw.primaryHex, tw.vary)

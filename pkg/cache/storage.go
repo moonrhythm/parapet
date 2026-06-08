@@ -99,6 +99,12 @@ type Meta struct {
 	Tags       []string    `json:"tags,omitempty"` // surrogate keys from the response Cache-Tag header; for out-of-band tag-scoped Range maintenance
 	Created    int64       `json:"created"`        // unix nanos
 	FreshUntil int64       `json:"fresh"`          // unix nanos; entry is stale after this
-	Size       int64       `json:"size"`           // body bytes (== eviction weight)
-	Status     int         `json:"status"`
+	// StaleWhileRevalidate and StaleIfError are RFC 5861 windows in nanoseconds
+	// PAST FreshUntil: within StaleWhileRevalidate a stale entry may be served
+	// while it is revalidated in the background; within StaleIfError a stale entry
+	// may be served when revalidation fails. 0 means the window is not offered.
+	StaleWhileRevalidate int64 `json:"swr,omitempty"`
+	StaleIfError         int64 `json:"sie,omitempty"`
+	Size                 int64 `json:"size"` // body bytes (== eviction weight)
+	Status               int   `json:"status"`
 }

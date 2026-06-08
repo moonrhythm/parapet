@@ -287,10 +287,13 @@ func (s *DiskStorage) scan(now time.Time) {
 				reapIfStale(mp, now) // meta without body (torn)
 				continue
 			}
-			if now.After(time.Unix(0, m.FreshUntil)) {
-				// Age-gated like the other reap paths so a concurrent in-flight commit
-				// (mtime ~now) is never destroyed; a genuinely expired-on-disk entry is
-				// older than reapMinAge, and any expired entry is reaped on access too.
+			if now.After(m.serveableUntil()) {
+				// Past every serveable window (FreshUntil plus the larger RFC 5861
+				// stale window), matching classify so a stale-but-serveable entry is
+				// not reaped out from under stale-if-error. Age-gated like the other
+				// reap paths so a concurrent in-flight commit (mtime ~now) is never
+				// destroyed; a genuinely expired-on-disk entry is older than reapMinAge,
+				// and any expired entry is reaped on access too.
 				reapIfStale(mp, now)
 				reapIfStale(filepath.Join(shardPath, key+".body"), now)
 				continue
