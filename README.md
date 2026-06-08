@@ -281,6 +281,15 @@ s.Use(h)
 
 `Options` also exposes `Cacheable` (a per-request predicate to exclude vetted paths), `InvalidatedAfter` (out-of-band purge), `LockTimeout`, and `DecoupleFill` (keep a slow client from stalling waiting followers). Because only origin-opted-in public content is cached, mark per-user or authorization-sensitive responses uncacheable at the origin.
 
+### Stale serving (RFC 5861)
+
+When the origin sets `Cache-Control: stale-while-revalidate=<s>` or `stale-if-error=<s>` on a cacheable response, the cache may serve the entry **after** it goes stale:
+
+- **`stale-while-revalidate`** — within the window, a stale entry is served immediately (`X-Cache: STALE`) while a single background revalidation refreshes it, so the client never waits on the origin. The detached fetch is bounded by `Options.RevalidateTimeout` (default 30s).
+- **`stale-if-error`** — past any `stale-while-revalidate` window, the cache contacts the origin and, only if it answers with a server error (5xx), serves the stale entry instead of the error (`X-Cache: STALE`).
+
+`must-revalidate`/`proxy-revalidate` suppress both. The client's request `Cache-Control` is ignored (only the origin's response directives are honored), consistent with the rest of the cache. Note that an entry offering these windows is retained in storage until it is past the larger window (not just past freshness), so stale-if-error still has something to fall back to — total size remains bounded by the backend's LRU cap.
+
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.
