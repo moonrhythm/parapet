@@ -2,6 +2,9 @@ package cache_test
 
 import (
 	"log"
+	"net/http"
+	"strings"
+	"time"
 
 	"github.com/moonrhythm/parapet"
 	"github.com/moonrhythm/parapet/pkg/cache"
@@ -23,4 +26,17 @@ func ExampleNew() {
 		DecoupleFill: true,    // a slow client won't stall waiting followers
 	}))
 	// s.Use(upstream.SingleHost(...)) — the handler whose responses get cached.
+}
+
+// Force caching for an origin that sends no cache headers, deciding on both the
+// request and the origin's response — here, only successful image responses.
+func ExampleOverride() {
+	cache.New(cache.NewMemory(256<<20), cache.Options{
+		Override: func(r *http.Request, status int, header http.Header) *cache.Override {
+			if status == http.StatusOK && strings.HasPrefix(header.Get("Content-Type"), "image/") {
+				return &cache.Override{TTL: time.Hour} // OverrideBalanced by default
+			}
+			return nil // everything else: respect the origin's Cache-Control
+		},
+	})
 }

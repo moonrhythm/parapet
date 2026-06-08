@@ -281,6 +281,41 @@ s.Use(h)
 
 `Options` also exposes `Cacheable` (a per-request predicate to exclude vetted paths), `InvalidatedAfter` (out-of-band purge), `LockTimeout`, and `DecoupleFill` (keep a slow client from stalling waiting followers). Because only origin-opted-in public content is cached, mark per-user or authorization-sensitive responses uncacheable at the origin.
 
+### Forcing caching for an origin you don't control
+
+`Options.Override` is a hook that returns a forced caching policy, overriding the origin's `Cache-Control` — so you can cache an origin that sends no (or unwanted) cache headers. It is called on each GET/HEAD fill with the **request and the origin's response** (status + headers), so the decision can key on anything in the request (host, path, extension) *and* the response (`Content-Type`, `Content-Length`, status). Return `nil` to honor the origin. The forced policy is baked into the **stored entry only**, so the served `Cache-Control` stays the origin's and doesn't propagate downstream.
+
+```go
+cache.New(store, cache.Options{
+    Override: func(r *http.Request, status int, header http.Header) *cache.Override {
+        switch {
+        case status != http.StatusOK:
+            return nil                                       // only force 200s
+        case strings.HasPrefix(header.Get("Content-Type"), "image/"):
+            return &cache.Override{TTL: time.Hour}           // force images for 1h
+        case r.Host == "static.example.com" && strings.HasSuffix(r.URL.Path, ".js"):
+            return &cache.Override{TTL: 24 * time.Hour}      // force this host's JS for a day
+        default:
+            return nil                                        // everything else: respect upstream
+        }
+    },
+})
+```
+
+`status` and `header` are the live origin response — read them, don't mutate them.
+
+`Override.Mode` chooses how far the force reaches over the origin's own directives — the safety trade-off is yours per request:
+
+| Mode | Overrides | Still refuses |
+|---|---|---|
+| `OverrideBalanced` (default) | missing freshness, `no-cache`, `max-age`, `Expires` | `no-store`, `private`, `Set-Cookie`, `Vary: *`, non-cacheable status, oversize, `Authorization` without a shared opt-in |
+| `OverrideConservative` | only *missing* freshness | everything the origin says (`no-cache`/`no-store`/`private`/`max-age` all honored) |
+| `OverrideAggressive` | almost everything, incl. `no-store`/`private`/`Authorization` | `Set-Cookie`, `Vary: *`, non-cacheable status, oversize |
+
+> ⚠️ Forcing trusts you to target cacheable paths. The cache key ignores the request's `Cookie` and `Authorization`, so **don't force per-user paths**: even `OverrideBalanced` will cross-user-leak a response gated by a session `Cookie` when the origin sends no `Set-Cookie`/`private`/`no-store`. `OverrideAggressive` additionally bypasses the `Authorization` gate. Scope the hook to known-public paths (or use `Options.Cacheable`).
+
+`Override.StaleWhileRevalidate` / `StaleIfError` force the RFC 5861 windows too (see below). For an unconditional default instead of a per-request hook, use `Options.DefaultStaleWhileRevalidate` / `DefaultStaleIfError`.
+
 ### Stale serving (RFC 5861)
 
 When the origin sets `Cache-Control: stale-while-revalidate=<s>` or `stale-if-error=<s>` on a cacheable response, the cache may serve the entry **after** it goes stale:

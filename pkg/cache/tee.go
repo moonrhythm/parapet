@@ -64,7 +64,13 @@ func (tw *teeWriter) WriteHeader(code int) {
 
 	h := tw.rw.Header()
 	reqAuthorized := tw.r.Header.Get("Authorization") != ""
-	dec := decide(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, time.Now())
+	now := time.Now()
+	var dec decision
+	if ov := tw.c.overrideFor(tw.r, code, h); ov != nil {
+		dec = decideForced(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, now, ov)
+	} else {
+		dec = decide(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, now)
+	}
 	if dec.cacheable {
 		vary := append([]string(nil), dec.vary...)
 		sort.Strings(vary)

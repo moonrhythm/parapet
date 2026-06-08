@@ -70,16 +70,9 @@ type decision struct {
 // through uncached. HEAD has no body and is unaffected.
 func decide(method string, status int, h http.Header, reqAuthorized bool, maxFileSize int64, now time.Time) decision {
 	no := decision{}
-	if !cacheableStatus(status) {
+	vary, ok := storeRefusals(status, h)
+	if !ok {
 		return no
-	}
-	// A Set-Cookie response is per-client; never store it in a shared cache.
-	if len(h.Values("Set-Cookie")) > 0 {
-		return no
-	}
-	vary, varyStar := parseVary(h)
-	if varyStar {
-		return no // Vary: * — no single key can represent it
 	}
 	cc := parseCacheControl(h)
 	if cc.private || cc.noStore || cc.noCache {
@@ -90,27 +83,135 @@ func decide(method string, status int, h http.Header, reqAuthorized bool, maxFil
 	// public, s-maxage, or must-revalidate. The honor-origin policy otherwise keys
 	// without Authorization, so without this gate a bare max-age response to an
 	// authenticated request would be served to other users — a cross-user leak.
-	sharedOptIn := cc.public || cc.hasSMax || cc.mustRevalidate
-	if reqAuthorized && !sharedOptIn {
+	if reqAuthorized && !sharedOptIn(cc) {
 		return no
 	}
 	ttl := freshness(cc, h, now)
 	if ttl <= 0 {
 		return no // honor-origin: no explicit freshness -> not cached
 	}
+	if !fitsCap(method, h, maxFileSize) {
+		return no
+	}
 	// Clamp absurd freshness so now+ttl stays within time.UnixNano's range.
 	if ttl > maxTTL {
 		ttl = maxTTL
 	}
-	if method == http.MethodGet {
-		cl, ok := contentLength(h)
-		if !ok || cl < 0 || cl > maxFileSize {
-			return no
-		}
-	}
 	noStale := cc.mustRevalidate || cc.proxyRevalidate
 	swr, sie := staleWindows(cc)
 	return decision{cacheable: true, freshUntil: now.Add(ttl), vary: vary, staleWhileRevalidate: swr, staleIfError: sie, noStale: noStale}
+}
+
+// decideForced applies an operator-forced policy (Options.Override) instead of
+// honor-origin freshness. The always-refusals (status, Set-Cookie, Vary: *,
+// oversize) hold in every mode; ov.Mode chooses how many of the origin's own
+// refusals (no-cache, no-store/private, the Authorization gate) still apply and
+// whether the forced TTL overrides the origin's freshness. The caller guarantees
+// ov.TTL > 0.
+func decideForced(method string, status int, h http.Header, reqAuthorized bool, maxFileSize int64, now time.Time, ov *Override) decision {
+	no := decision{}
+	vary, ok := storeRefusals(status, h)
+	if !ok {
+		return no
+	}
+	cc := parseCacheControl(h)
+
+	// Mode-dependent refusals over the origin's Cache-Control.
+	switch ov.Mode {
+	case OverrideConservative:
+		if cc.private || cc.noStore || cc.noCache {
+			return no
+		}
+		if reqAuthorized && !sharedOptIn(cc) {
+			return no
+		}
+	case OverrideBalanced:
+		if cc.private || cc.noStore { // honor store-sensitivity, override no-cache
+			return no
+		}
+		if reqAuthorized && !sharedOptIn(cc) {
+			return no
+		}
+	case OverrideAggressive:
+		// only the always-refusals apply
+	}
+
+	// Freshness: Conservative fills only when the origin gave none; the others
+	// override outright.
+	ttl := ov.TTL
+	if ov.Mode == OverrideConservative {
+		if originTTL := freshness(cc, h, now); originTTL > 0 {
+			ttl = originTTL
+		}
+	}
+	if ttl <= 0 {
+		return no
+	}
+	if !fitsCap(method, h, maxFileSize) {
+		return no
+	}
+	if ttl > maxTTL {
+		ttl = maxTTL
+	}
+
+	// Windows: Conservative honors the origin (with the forced windows filling any
+	// gap and must-revalidate still suppressing); the others force the windows.
+	var swr, sie time.Duration
+	var noStale bool
+	if ov.Mode == OverrideConservative {
+		swr, sie = staleWindows(cc)
+		noStale = cc.mustRevalidate || cc.proxyRevalidate
+		// Conservative honors the origin: when it forbids stale serving
+		// (must-revalidate / proxy-revalidate) don't fill the forced windows either.
+		if !noStale {
+			if swr == 0 {
+				swr = clampStaleWindow(ov.StaleWhileRevalidate)
+			}
+			if sie == 0 {
+				sie = clampStaleWindow(ov.StaleIfError)
+			}
+		}
+	} else {
+		swr = clampStaleWindow(ov.StaleWhileRevalidate)
+		sie = clampStaleWindow(ov.StaleIfError)
+	}
+	return decision{cacheable: true, freshUntil: now.Add(ttl), vary: vary, staleWhileRevalidate: swr, staleIfError: sie, noStale: noStale}
+}
+
+// storeRefusals applies the refusals that hold for any cached entry regardless of
+// an override: a non-cacheable status, a per-client Set-Cookie, and Vary: * (no
+// single key can represent it). It returns the parsed Vary names and ok=false on
+// a refusal.
+func storeRefusals(status int, h http.Header) (vary []string, ok bool) {
+	if !cacheableStatus(status) {
+		return nil, false
+	}
+	if len(h.Values("Set-Cookie")) > 0 {
+		return nil, false
+	}
+	vary, varyStar := parseVary(h)
+	if varyStar {
+		return nil, false
+	}
+	return vary, true
+}
+
+// sharedOptIn reports the RFC 9111 §3.5 opt-in that lets a shared cache store a
+// response to an Authorization-bearing request.
+func sharedOptIn(cc cacheControl) bool {
+	return cc.public || cc.hasSMax || cc.mustRevalidate
+}
+
+// fitsCap reports whether a GET response's Content-Length is present and within
+// the per-object cap (HEAD has no body and always fits). A chunked GET (no
+// Content-Length) is not cacheable: the middleware commits only when written
+// bytes match Content-Length, so a truncated response is never stored.
+func fitsCap(method string, h http.Header, maxFileSize int64) bool {
+	if method != http.MethodGet {
+		return true
+	}
+	cl, ok := contentLength(h)
+	return ok && cl >= 0 && cl <= maxFileSize
 }
 
 // staleWindows derives the RFC 5861 stale-serving windows from the response

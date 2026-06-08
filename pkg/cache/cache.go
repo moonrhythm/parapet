@@ -56,6 +56,31 @@ type Options struct {
 	// vector — see the package doc). nil caches everything otherwise cacheable.
 	Cacheable func(r *http.Request) bool
 
+	// Override, when non-nil, may return a forced caching policy that overrides the
+	// origin's Cache-Control — letting you cache an origin that sends no (or
+	// unwanted) cache headers. It is called on each GET/HEAD fill with the request
+	// and the origin's response status and headers (before the body), so the
+	// decision can key on anything in the request (host, path, extension) AND the
+	// response (Content-Type, Content-Length, status). Return nil to honor the
+	// origin for that response (the default). header is a copy of the response
+	// headers, so reading it is safe and mutating it has no effect.
+	//
+	// The forced policy is baked into the stored entry only, so the served
+	// Cache-Control stays the origin's and does not propagate downstream. How far
+	// the override reaches is set per request by Override.Mode; safety refusals
+	// (see Override) still apply.
+	//
+	// It runs on every fill, including background stale-while-revalidate refreshes,
+	// and is re-evaluated against the fresh response each time (so a response-shape
+	// change can change the policy). Don't key on wall-clock or random state.
+	// Changing the hook does not re-policy already-stored entries.
+	//
+	// Forcing trusts you to target cacheable paths: the cache key ignores the
+	// request's Cookie/Authorization, so do not force per-user paths (see the
+	// per-mode safety notes on OverrideMode). Cacheable returning false takes
+	// precedence — an excluded request is never forced.
+	Override func(r *http.Request, status int, header http.Header) *Override
+
 	// MaxFileSize caps a cacheable response's body. A GET response larger than
 	// this (by Content-Length, or mid-stream) is not cached but still served in
 	// full. Defaults to 8 MiB when <= 0.
@@ -113,12 +138,65 @@ type Options struct {
 	DecoupleFill bool
 }
 
+// OverrideMode selects how far an Override reaches over the origin's
+// Cache-Control. The zero value is OverrideBalanced.
+type OverrideMode int
+
+const (
+	// OverrideBalanced forces freshness and overrides no-cache / max-age /
+	// Expires, but still refuses a response that is unsafe to share: no-store,
+	// private, Set-Cookie, Vary: *, a non-cacheable status, an oversize body, or
+	// an Authorization-bearing request without a shared opt-in.
+	//
+	// It does NOT inspect the request's Cookie header, and the cache key ignores
+	// Cookie. So a per-user response gated by a session cookie — with none of the
+	// markers above (no Set-Cookie/private/no-store, no Authorization) — would be
+	// force-cached and served to other users. Only target paths you know are not
+	// per-user (scope the Override hook, or use Options.Cacheable). Good for static
+	// assets.
+	OverrideBalanced OverrideMode = iota
+
+	// OverrideConservative only fills freshness when the origin declares none and
+	// otherwise honors the origin's Cache-Control entirely (no-cache/no-store/
+	// private and any explicit max-age are respected). Safest; does nothing for an
+	// origin that already sends no-cache/no-store.
+	OverrideConservative
+
+	// OverrideAggressive overrides almost everything, including no-store, private,
+	// and the Authorization gate. Only Set-Cookie, Vary: *, a non-cacheable status,
+	// and an oversize body still refuse.
+	//
+	// DANGER: this can cause a CROSS-USER LEAK. Bypassing the Authorization gate
+	// means a response to one user's authenticated request is stored under a key
+	// that ignores Authorization (host+method+scheme+uri+declared Vary), so it is
+	// then served to other — including unauthenticated — users. Use it only for
+	// endpoints with no per-user or secret data, or where the origin sends
+	// Vary: Authorization (which puts the credential in the key). Prefer
+	// OverrideBalanced unless you are certain.
+	OverrideAggressive
+)
+
+// Override is a forced caching policy for one request, returned by
+// Options.Override. TTL is the forced freshness lifetime and is required: a
+// non-positive TTL means "do not force" (honor the origin). StaleWhileRevalidate
+// and StaleIfError force the RFC 5861 windows. Mode selects which origin safety
+// signals the force still respects.
+//
+//nolint:govet
+type Override struct {
+	TTL                  time.Duration
+	StaleWhileRevalidate time.Duration
+	StaleIfError         time.Duration
+	Mode                 OverrideMode
+}
+
 // Cache is the HTTP response-cache middleware. It implements parapet.Middleware
 // (ServeHandler). Construct with New, giving it a Storage backend.
 type Cache struct {
 	storage          Storage
 	invalidatedAfter func(r *http.Request, m Meta) int64
 	cacheable        func(r *http.Request) bool
+	override         func(r *http.Request, status int, header http.Header) *Override
 	primaryVary      map[string][]string  // primaryHex -> Vary header names learned from a stored response
 	locks            map[string]*fillLock // variantHex -> in-flight fill
 	maxFileSize       int64
@@ -166,10 +244,28 @@ func New(storage Storage, opts Options) *Cache {
 		defaultSIE:        clampStaleWindow(opts.DefaultStaleIfError),
 		invalidatedAfter:  opts.InvalidatedAfter,
 		cacheable:         opts.Cacheable,
+		override:          opts.Override,
 		decoupleFill:      opts.DecoupleFill,
 		primaryVary:       map[string][]string{},
 		locks:             map[string]*fillLock{},
 	}
+}
+
+// overrideFor returns the forced caching policy for the request and its origin
+// response, or nil to honor the origin. A nil hook, a nil result, or a
+// non-positive TTL all mean "don't force". The hook receives a COPY of the
+// response headers (only allocated when a hook is set), so it cannot mutate the
+// live response — matching the independent-copy contract of Storage.Get and the
+// InvalidatedAfter hook.
+func (c *Cache) overrideFor(r *http.Request, status int, header http.Header) *Override {
+	if c.override == nil {
+		return nil
+	}
+	ov := c.override(r, status, header.Clone())
+	if ov == nil || ov.TTL <= 0 {
+		return nil
+	}
+	return ov
 }
 
 // ServeHandler implements parapet.Middleware: it wraps next (the
