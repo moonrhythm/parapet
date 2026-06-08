@@ -28,6 +28,15 @@ func ExampleNew() {
 	// s.Use(upstream.SingleHost(...)) — the handler whose responses get cached.
 }
 
+// Make the cache observable: record the per-request outcome (HIT/MISS/STALE/
+// STALE_ERROR/BYPASS) as a "cacheStatus" field in the structured access log. Pair
+// with prom.Cache() for Prometheus metrics (see that function's example).
+func ExampleLogResult() {
+	cache.New(cache.NewMemory(256<<20), cache.Options{
+		OnResult: cache.LogResult,
+	})
+}
+
 // Force caching for an origin that sends no cache headers, deciding on both the
 // request and the origin's response — here, only successful image responses.
 func ExampleOverride() {

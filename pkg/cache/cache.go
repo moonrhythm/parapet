@@ -81,6 +81,17 @@ type Options struct {
 	// precedence — an excluded request is never forced.
 	Override func(r *http.Request, status int, header http.Header) *Override
 
+	// OnResult, when non-nil, is called once per request the cache serves, after it
+	// decides how it was served, with the request and a ResultInfo (the outcome —
+	// HIT/MISS/STALE/STALE_ERROR/BYPASS — and, on a fill, its duration). It makes
+	// the cache observable without changing behavior: see prom.Cache for Prometheus
+	// metrics and cache.LogResult for a structured-log field, or compose your own
+	// ResultFunc. It runs synchronously on the foreground serving path only, never
+	// from the background stale-while-revalidate goroutine; a panic unwinding from
+	// the origin handler during a fill is not reported. nil disables it (zero
+	// overhead). The callee owns its own concurrency.
+	OnResult ResultFunc
+
 	// MaxFileSize caps a cacheable response's body. A GET response larger than
 	// this (by Content-Length, or mid-stream) is not cached but still served in
 	// full. Defaults to 8 MiB when <= 0.
@@ -197,6 +208,7 @@ type Cache struct {
 	invalidatedAfter func(r *http.Request, m Meta) int64
 	cacheable        func(r *http.Request) bool
 	override         func(r *http.Request, status int, header http.Header) *Override
+	onResult         ResultFunc
 	primaryVary      map[string][]string  // primaryHex -> Vary header names learned from a stored response
 	locks            map[string]*fillLock // variantHex -> in-flight fill
 	maxFileSize       int64
@@ -245,6 +257,7 @@ func New(storage Storage, opts Options) *Cache {
 		invalidatedAfter:  opts.InvalidatedAfter,
 		cacheable:         opts.Cacheable,
 		override:          opts.Override,
+		onResult:          opts.OnResult,
 		decoupleFill:      opts.DecoupleFill,
 		primaryVary:       map[string][]string{},
 		locks:             map[string]*fillLock{},
@@ -282,6 +295,7 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, next http.Handler)
 	// so it must not answer a Range request with a stored full 200 (let the origin
 	// serve 206). They are also not used to fill the cache.
 	if !cacheableMethod(r.Method) || isUpgrade(r) || r.Header.Get("Range") != "" || (c.cacheable != nil && !c.cacheable(r)) {
+		c.report(r, ResultInfo{Result: ResultBypass})
 		next.ServeHTTP(w, r) // never cache these; no X-Cache header
 		return
 	}
@@ -290,25 +304,35 @@ func (c *Cache) serve(w http.ResponseWriter, r *http.Request, next http.Handler)
 	if m, body, ok := c.storage.Get(key); ok {
 		switch c.classify(m, r, time.Now()) {
 		case stateFresh:
+			c.report(r, ResultInfo{Result: ResultHit})
 			writeStored(w, r, m, body, "HIT")
 			return
 		case stateStaleRevalidate:
 			// RFC 5861 stale-while-revalidate: serve the stale entry now and refresh
 			// it in the background (single-flighted), so the client never waits on the
 			// origin.
+			c.report(r, ResultInfo{Result: ResultStale})
 			writeStored(w, r, m, body, "STALE")
 			c.revalidate(r, next, primaryHex)
 			return
 		case stateStaleIfError:
 			// RFC 5861 stale-if-error: try the origin, but fall back to this stale
 			// entry if the revalidation returns a server error.
-			c.fillWithStale(w, r, next, primaryHex, m, body)
+			c.report(r, c.fillWithStale(w, r, next, primaryHex, m, body))
 			return
 		case stateExpired:
 			c.storage.Delete(key)
 		}
 	}
-	c.fillAndServe(w, r, next, primaryHex)
+	c.report(r, c.fillAndServe(w, r, next, primaryHex))
+}
+
+// report invokes the OnResult hook, if any. It is nil-cheap so an unobserved
+// cache pays nothing.
+func (c *Cache) report(r *http.Request, info ResultInfo) {
+	if c.onResult != nil {
+		c.onResult(r, info)
+	}
 }
 
 // tryServeHit serves key from storage if present and fresh, returning true. It is
@@ -344,13 +368,12 @@ func (c *Cache) tryServeHit(w http.ResponseWriter, r *http.Request, key string) 
 // origin fetch and is cached, instead of every differing follower fetching
 // uncached. The loop runs at most twice: once on the pre-Vary key, once on the
 // learned-Vary key (which is stable thereafter).
-func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex string) {
+func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex string) ResultInfo {
 	for attempt := 0; attempt < 2; attempt++ {
 		variantHex := c.variantHash(primaryHex, r)
 		lock, leader := c.acquire(variantHex)
 		if leader {
-			c.fill(w, r, next, primaryHex, variantHex, lock)
-			return
+			return c.fill(w, r, next, primaryHex, variantHex, lock)
 		}
 		lock.waiters.Add(1)
 		select {
@@ -362,7 +385,7 @@ func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.H
 		// primary's Vary, so our key now matches the stored entry IF our varied
 		// values match the leader's. A wrong-Vary variant is never served.
 		if c.tryServeHit(w, r, c.variantHash(primaryHex, r)) {
-			return
+			return ResultInfo{Result: ResultHit} // served from the leader's just-filled entry
 		}
 		// Still a miss. If the leader learned a Vary we differ on, our key changed —
 		// loop to lead/join the fill for our own variant. If the key is unchanged
@@ -373,13 +396,15 @@ func (c *Cache) fillAndServe(w http.ResponseWriter, r *http.Request, next http.H
 		}
 	}
 	w.Header().Set("X-Cache", "MISS")
+	start := time.Now()
 	next.ServeHTTP(w, r)
+	return ResultInfo{Result: ResultMiss, FillDuration: time.Since(start)}
 }
 
 // fill is the leader path: stream the response to the client through a teeWriter
 // that also writes the cacheable body to storage, commit on completion, then
 // release the fill lock so waiting followers find the committed entry.
-func (c *Cache) fill(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex, variantHex string, lock *fillLock) {
+func (c *Cache) fill(w http.ResponseWriter, r *http.Request, next http.Handler, primaryHex, variantHex string, lock *fillLock) ResultInfo {
 	released := false
 	release := func() {
 		if !released {
@@ -391,8 +416,12 @@ func (c *Cache) fill(w http.ResponseWriter, r *http.Request, next http.Handler, 
 
 	tw := &teeWriter{rw: w, r: r, c: c, method: r.Method, primaryHex: primaryHex, lock: lock}
 	defer tw.cleanup() // panic-safe: abort an uncommitted entry if finish never ran
+	start := time.Now()
 	next.ServeHTTP(tw, r)
 	tw.finish()
+	// The fill is the origin round-trip + store; the leader's own client write (below,
+	// under DecoupleFill) is serve time, not fill time, so stamp the duration here.
+	dur := time.Since(start)
 
 	// DecoupleFill: the cacheable body was streamed to storage, not the client, so
 	// release the lock now (waiting followers find the committed entry) and only then
@@ -402,6 +431,7 @@ func (c *Cache) fill(w http.ResponseWriter, r *http.Request, next http.Handler, 
 		release()
 		tw.serveLeader()
 	}
+	return ResultInfo{Result: ResultMiss, FillDuration: dur}
 }
 
 func (c *Cache) acquire(variantHex string) (*fillLock, bool) {
