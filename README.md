@@ -217,13 +217,13 @@ prevents algorithm-confusion attacks. The signature, `exp`/`nbf` (with leeway),
 and optional `iss`/`aud` claims are all verified; verified claims are placed on
 the request context for downstream handlers.
 
-```go
-import (
-	jose "github.com/go-jose/go-jose/v4"
-	"github.com/moonrhythm/parapet/pkg/authn"
-)
+Algorithms are pinned with this package's own constants (`authn.HS256`,
+`authn.RS256`, …), so callers don't import a JOSE library — only `pkg/authn`.
 
-m := authn.JWT([]byte(secret), jose.HS256) // []byte for HMAC; a public key for RS*/ES*/EdDSA
+```go
+import "github.com/moonrhythm/parapet/pkg/authn"
+
+m := authn.JWT([]byte(secret), authn.HS256) // []byte for HMAC; a public key for RS*/ES*/EdDSA
 m.Issuer = "https://issuer.example.com"
 m.Audience = "my-api"
 s.Use(m)
@@ -231,6 +231,31 @@ s.Use(m)
 // downstream
 claims, ok := authn.JWTClaimsFromContext(r.Context())
 ```
+
+### Rotating keys from a remote JWKS
+
+For tokens signed by an OIDC provider (Auth0, Okta, Google, …), verify against
+the provider's `jwks_uri` instead of a static key with `authn.JWKS`. It fetches
+the key set over HTTP and caches it, picking up signing-key **rotation** without
+a restart: a stale cache is refreshed in the background while the last good set
+keeps serving, and a token bearing an unknown `kid` triggers a single-flighted
+refetch (rate-limited so bogus `kid`s can't hammer the endpoint). Refresh
+failures are **fail-static** — once a set has been fetched, a later fetch error
+never starts rejecting valid tokens. The algorithm allowlist is still mandatory
+and enforced exactly as above.
+
+```go
+m := authn.JWTFromKeySource(
+	&authn.JWKS{URL: "https://issuer.example.com/.well-known/jwks.json"},
+	authn.RS256, // pin the accepted algorithm(s)
+)
+m.Issuer = "https://issuer.example.com"
+m.Audience = "my-api"
+s.Use(m)
+```
+
+`JWKS` exposes `RefreshInterval` (cache TTL, default 15m), `MinRefreshInterval`
+(unknown-`kid` refetch rate limit, default 1m), `Client`, and `MaxResponseBytes`.
 
 ## Response caching
 
