@@ -281,6 +281,38 @@ s.Use(h)
 
 `Options` also exposes `Cacheable` (a per-request predicate to exclude vetted paths), `InvalidatedAfter` (out-of-band purge), `LockTimeout`, and `DecoupleFill` (keep a slow client from stalling waiting followers). Because only origin-opted-in public content is cached, mark per-user or authorization-sensitive responses uncacheable at the origin.
 
+### Forcing caching for an origin you don't control
+
+`Options.Override` is a per-request hook that returns a forced caching policy, overriding the origin's `Cache-Control` — so you can cache an origin that sends no (or unwanted) cache headers, decided on anything in the request (host, path, extension). Return `nil` to honor the origin. The forced policy is baked into the **stored entry only**, so the served `Cache-Control` stays the origin's and doesn't propagate downstream.
+
+```go
+cache.New(store, cache.Options{
+    Override: func(r *http.Request) *cache.Override {
+        switch {
+        case strings.HasSuffix(r.URL.Path, ".js"), strings.HasSuffix(r.URL.Path, ".css"),
+            strings.HasSuffix(r.URL.Path, ".jpg"):
+            return &cache.Override{TTL: time.Hour}          // force static assets for 1h
+        case r.Host == "b.example.com":
+            return nil                                       // host B: respect upstream
+        default:
+            return nil
+        }
+    },
+})
+```
+
+`Override.Mode` chooses how far the force reaches over the origin's own directives — the safety trade-off is yours per request:
+
+| Mode | Overrides | Still refuses |
+|---|---|---|
+| `OverrideBalanced` (default) | missing freshness, `no-cache`, `max-age`, `Expires` | `no-store`, `private`, `Set-Cookie`, `Vary: *`, non-cacheable status, oversize, `Authorization` without a shared opt-in |
+| `OverrideConservative` | only *missing* freshness | everything the origin says (`no-cache`/`no-store`/`private`/`max-age` all honored) |
+| `OverrideAggressive` | almost everything, incl. `no-store`/`private`/`Authorization` | `Set-Cookie`, `Vary: *`, non-cacheable status, oversize |
+
+> ⚠️ `OverrideAggressive` bypasses the `Authorization` gate. Because the cache key ignores `Authorization`, one user's authenticated response can be stored and served to other (including unauthenticated) users. Use it only on endpoints with no per-user/secret data, or where the origin sends `Vary: Authorization`.
+
+`Override.StaleWhileRevalidate` / `StaleIfError` force the RFC 5861 windows too (see below). For an unconditional default instead of a per-request hook, use `Options.DefaultStaleWhileRevalidate` / `DefaultStaleIfError`.
+
 ### Stale serving (RFC 5861)
 
 When the origin sets `Cache-Control: stale-while-revalidate=<s>` or `stale-if-error=<s>` on a cacheable response, the cache may serve the entry **after** it goes stale:
