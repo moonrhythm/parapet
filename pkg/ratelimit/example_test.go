@@ -32,6 +32,22 @@ func ExampleSlidingWindowPerSecond() {
 	s.Use(ratelimit.SlidingWindowPerSecond(10)) // ~10 req/s per client IP, no boundary doubling
 }
 
+// RedisFixedWindow enforces ONE global limit across a fleet of proxy instances by
+// keeping the counter in Redis. Inject your client via a tiny RedisRunnerFunc
+// adapter so pkg/ratelimit depends on no Redis library; it fails open on a Redis
+// error. Here every instance shares a 1000 req/min budget per client IP.
+func ExampleRedisFixedWindowPerMinute() {
+	// rdb is your *redis.Client (go-redis); the adapter is the only client-specific code.
+	// runner := ratelimit.RedisRunnerFunc(
+	// 	func(ctx context.Context, script string, keys []string, args ...any) (int64, error) {
+	// 		return rdb.Eval(ctx, script, keys, args...).Int64()
+	// 	})
+	var runner ratelimit.RedisRunner // = runner above
+
+	s := parapet.New()
+	s.Use(ratelimit.RedisFixedWindowPerMinute(runner, 1000))
+}
+
 // Concurrent caps the number of in-flight requests per key rather than the
 // arrival rate; once a request finishes, its slot is freed. Excess requests are
 // rejected immediately. Useful for protecting an expensive endpoint from pile-up.
