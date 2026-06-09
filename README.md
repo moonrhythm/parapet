@@ -361,6 +361,29 @@ go func() { for range time.Tick(5 * time.Minute) { pt.Reap(store) } }() // proac
 
 `Snapshot`/`Restore` serialize the table so purges survive a restart (persist however you like). It's the engine [parapet-ingress-controller](https://github.com/moonrhythm/parapet-ingress-controller) builds its control-plane purge distribution on top of.
 
+## Weighted and least-connection load balancing
+
+`upstream.NewRoundRobinLoadBalancer` weights every target equally. Two strategies
+bias by a per-`Target` `Weight` (values `<= 0` count as 1), each optimizing a
+different axis:
+
+- `upstream.NewWeightedRoundRobinLoadBalancer` distributes request **count** in
+  proportion to weight, using smooth weighted round-robin (the nginx algorithm),
+  so a heavy target's picks are interleaved rather than dealt in a burst. With
+  equal weights it is plain round-robin.
+- `upstream.NewLeastConnLoadBalancer` routes each request to the target with the
+  fewest in-flight requests (weighted: lowest `active/Weight`), so it tracks
+  **concurrency** rather than count — which adapts to slow backends and
+  long-lived requests a count-based balancer misses. A request stays counted
+  until its response body is closed, which parapet's reverse proxy always does.
+
+```go
+s.Use(upstream.New(upstream.NewWeightedRoundRobinLoadBalancer([]*upstream.Target{
+	{Host: "10.0.0.1:8080", Transport: &upstream.HTTPTransport{}, Weight: 3},
+	{Host: "10.0.0.2:8080", Transport: &upstream.HTTPTransport{}, Weight: 1},
+})))
+```
+
 ## Load balancing with passive health checks
 
 `upstream.NewRoundRobinLoadBalancer` spreads requests evenly but keeps routing to
