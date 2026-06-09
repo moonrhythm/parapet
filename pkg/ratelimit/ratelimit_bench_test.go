@@ -55,11 +55,35 @@ func BenchmarkLeakyBucket(b *testing.B) {
 	benchStrategy(b, ratelimit.LeakyBucket(time.Nanosecond, 1<<20))
 }
 
+// BenchmarkSlidingWindow exercises the per-second sliding window. The rate is huge
+// so every Take admits; this measures the extra cost of the roll + weighted blend
+// over the fixed window's integer compare.
+func BenchmarkSlidingWindow(b *testing.B) {
+	benchStrategy(b, ratelimit.SlidingWindowPerSecond(1<<30))
+}
+
 // BenchmarkFixedWindowParallel measures lock contention. The fixed window
 // holds a single global mutex per Take; contention should grow linearly
 // with parallelism.
 func BenchmarkFixedWindowParallel(b *testing.B) {
 	m := ratelimit.FixedWindowPerSecond(1 << 30)
+	m.Key = keyFn()
+	h := m.ServeHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		w := newBenchRW()
+		for pb.Next() {
+			h.ServeHTTP(w, r)
+		}
+	})
+}
+
+// BenchmarkSlidingWindowParallel measures the sliding window's contention profile —
+// the same single global mutex as the fixed window, so the same contention ceiling.
+func BenchmarkSlidingWindowParallel(b *testing.B) {
+	m := ratelimit.SlidingWindowPerSecond(1 << 30)
 	m.Key = keyFn()
 	h := m.ServeHandler(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	r := httptest.NewRequest(http.MethodGet, "/", nil)

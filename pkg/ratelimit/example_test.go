@@ -24,6 +24,14 @@ func ExampleFixedWindow() {
 	s.Use(ratelimit.FixedWindow(100, 5*time.Minute))
 }
 
+// SlidingWindow smooths the up-to-2x burst a fixed window admits across its
+// boundary, at O(1) memory per key — a time-weighted blend of the current and
+// previous window counts. Same constructors and 429 behavior as FixedWindow.
+func ExampleSlidingWindowPerSecond() {
+	s := parapet.New()
+	s.Use(ratelimit.SlidingWindowPerSecond(10)) // ~10 req/s per client IP, no boundary doubling
+}
+
 // Concurrent caps the number of in-flight requests per key rather than the
 // arrival rate; once a request finishes, its slot is freed. Excess requests are
 // rejected immediately. Useful for protecting an expensive endpoint from pile-up.
