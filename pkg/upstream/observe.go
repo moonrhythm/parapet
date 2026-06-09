@@ -29,6 +29,11 @@ type RoundTripInfo struct {
 	// the load balancer had no target, etc. — or nil once a response was received,
 	// regardless of that response's status code.
 	Err error
+
+	// Attempt is the zero-based retry index: 0 on the first try, 1 on the first
+	// retry, and so on (read from the proxy's retry context). Existing observers
+	// simply see a new zero-valued field.
+	Attempt int
 }
 
 // RoundTripFunc observes an upstream round-trip. Assign one to Upstream.OnRoundTrip

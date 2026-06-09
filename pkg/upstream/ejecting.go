@@ -61,6 +61,14 @@ type EjectingLoadBalancer struct {
 	// nil, any transport error other than a client-canceled request counts.
 	// Set it to also treat responses such as 5xx as failures.
 	IsFailure func(resp *http.Response, err error) bool
+
+	// OnStateChange observes a target being ejected (ReasonEject) or returned to
+	// rotation on a confirmed success (ReasonRecover); nil disables it. It reflects
+	// committed eject/recover events, NOT cooldown-expiry rotation membership: a
+	// target whose cooldown has expired but has not yet served a successful request
+	// still reads StateOpen until that success. Alert on the prom.UpstreamState
+	// transitions counter, which is exact. The callee owns its own concurrency.
+	OnStateChange StateChangeFunc
 }
 
 // ejectTarget holds the passive-health state for a single target.
@@ -135,9 +143,14 @@ func (l *EjectingLoadBalancer) record(t *ejectTarget, resp *http.Response, err e
 	// the common all-healthy path only loads (shared cache lines) and never stores
 	// (which would bounce the line exclusive across cores on every request).
 	if t.fails.Load() != 0 || t.ejections.Load() != 0 || t.ejectedUntil.Load() != 0 {
+		// Swap (not Store) so exactly one of several concurrent successes observes the
+		// non-zero deadline and emits ReasonRecover — the recovery winner.
+		wasEjected := t.ejectedUntil.Swap(0) != 0
 		t.fails.Store(0)
 		t.ejections.Store(0)
-		t.ejectedUntil.Store(0)
+		if wasEjected && l.OnStateChange != nil {
+			l.OnStateChange(StateChange{Host: t.target.Host, From: StateOpen, To: StateClosed, Reason: ReasonRecover})
+		}
 	}
 }
 
@@ -168,6 +181,16 @@ func (l *EjectingLoadBalancer) eject(t *ejectTarget) {
 		until := now.Add(l.ejectionTimeout(e)).UnixNano()
 		if t.ejectedUntil.CompareAndSwap(prev, until) {
 			t.ejections.Store(e)
+			// A re-eject of a target that expired but never recovered (prev != 0) is a
+			// self-loop from open; a fresh eject is from closed. Keeps the metric edges
+			// chained given recover only fires on a confirmed success (see OnStateChange).
+			if l.OnStateChange != nil {
+				from := StateClosed
+				if prev != 0 {
+					from = StateOpen
+				}
+				l.OnStateChange(StateChange{Host: t.target.Host, From: from, To: StateOpen, Reason: ReasonEject})
+			}
 			return
 		}
 		// Lost the CAS to a concurrent ejector; re-read — its value is now in the

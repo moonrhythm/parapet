@@ -87,3 +87,23 @@ func TestUpstream_OnRoundTrip(t *testing.T) {
 		})
 	})
 }
+
+func TestUpstream_OnRoundTripAttempt(t *testing.T) {
+	t.Parallel()
+	// The retry index increments across attempts: 0 first try, 1 first retry, ...
+	var infos []RoundTripInfo
+	u := Upstream{
+		Transport: &mockTransport{roundTripFunc: func(r *http.Request) (*http.Response, error) {
+			return nil, fmt.Errorf("dial fail")
+		}},
+		Retries:       2,
+		BackoffFactor: time.Millisecond,
+		OnRoundTrip:   appendInfo(&infos),
+	}
+	u.ServeHandler(nil).ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/", nil))
+
+	require.Len(t, infos, 3, "1 initial + 2 retries")
+	assert.Equal(t, 0, infos[0].Attempt)
+	assert.Equal(t, 1, infos[1].Attempt)
+	assert.Equal(t, 2, infos[2].Attempt)
+}

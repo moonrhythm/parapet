@@ -415,7 +415,11 @@ lb.IsFailure = func(resp *http.Response, err error) bool {
 
 Pair it with `prom.Upstream()` (wired into `Upstream.OnRoundTrip`) to watch
 ejections take effect: traffic shifts off a failing backend in
-`parapet_upstream_requests{host,status}`.
+`parapet_upstream_requests{host,status}`. Wire each reliability balancer's
+`OnStateChange` to `prom.UpstreamState()` to make the state machine itself
+observable — `parapet_upstream_state_transitions_total{host,from,to,reason}`
+(trips, ejections, recoveries, half-open probes) plus a current-state gauge — and
+`prom.Upstream()` also counts fail-fast 503s in `parapet_upstream_fast_rejects_total`.
 
 `upstream.NewCircuitBreakingLoadBalancer` goes a step further: it **fails fast**.
 An open target is rejected *without a round-trip* (so a request never pays the
