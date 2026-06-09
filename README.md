@@ -376,6 +376,14 @@ different axis:
   **concurrency** rather than count — which adapts to slow backends and
   long-lived requests a count-based balancer misses. A request stays counted
   until its response body is closed, which parapet's reverse proxy always does.
+  Set `Target.MaxConcurrent` to cap a target's in-flight requests (the
+  **bulkhead** pattern): the cap is hard and never exceeded, surplus requests
+  route to an under-cap target, and when every target is full the balancer sheds
+  with `503` rather than overloading a saturated origin. A slot is freed only when
+  the response body is closed, so bound **total** request time (a request-context
+  deadline the transport honors) to keep a backend that stalls mid-body from
+  latching the cap — a response-header or idle timeout alone does not cover a
+  mid-body stall.
 
 ```go
 s.Use(upstream.New(upstream.NewWeightedRoundRobinLoadBalancer([]*upstream.Target{

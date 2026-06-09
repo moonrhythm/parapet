@@ -17,6 +17,30 @@ type Target struct {
 	// RoundRobinLoadBalancer, EjectingLoadBalancer, and CircuitBreakingLoadBalancer
 	// ignore this field and weight every target equally.
 	Weight int
+
+	// MaxConcurrent caps the in-flight requests LeastConnLoadBalancer routes to this
+	// target (the bulkhead pattern), isolating blast radius: a slow backend can hold
+	// at most this many in-flight requests and cannot drain the pool. A request
+	// counts as in-flight until its response body is closed (not at the headers), so
+	// the cap bounds true end-to-end concurrency including slow body streams. Beyond
+	// the cap, requests route to another under-cap target; when EVERY target is at
+	// its cap the balancer sheds (ErrUnavailable -> 503) rather than overloading a
+	// saturated origin. The cap is hard — never exceeded, even under a concurrent
+	// burst. Values <= 0 mean unbounded (the default). Only LeastConnLoadBalancer
+	// honors it; the other balancers ignore it.
+	//
+	// WARNING: a slot is held until the response body is closed; nothing else
+	// reclaims it. A backend that sends headers then stalls mid-body keeps its slot
+	// until the request's context is cancelled (which closes the body). No
+	// http.Transport timeout covers that stall: ResponseHeaderTimeout bounds only
+	// time-to-headers, and IdleConnTimeout reaps only idle pooled connections, never
+	// an in-flight stalled one. To bound a held slot you must cap TOTAL request time
+	// so the context is cancelled mid-body — a request-scoped context deadline the
+	// transport honors (note pkg/timeout disarms once upstream headers are written,
+	// so it does NOT cover a mid-body stall). Without such a total-time bound, after
+	// MaxConcurrent stalled requests the target sheds all traffic permanently — the
+	// cap becomes a latch, not a limiter.
+	MaxConcurrent int
 }
 
 // effectiveWeight normalizes a target's weight for the weighted balancers: a

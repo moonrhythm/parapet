@@ -23,7 +23,10 @@ func NewLeastConnLoadBalancer(targets []*Target) *LeastConnLoadBalancer {
 // A request stays counted as in-flight until its response body is closed, so it
 // must be driven by something that closes the body — parapet's reverse proxy does.
 // Used as a bare http.RoundTripper, the caller must close every response Body (the
-// standard RoundTripper contract) or the target's active count leaks.
+// standard RoundTripper contract) or the target's active count leaks. With a
+// Target.MaxConcurrent cap set, a leaked body is worse than skewed routing: it
+// permanently burns a hard slot, so after MaxConcurrent leaks the target sheds all
+// traffic (see the timeout warning on Target.MaxConcurrent).
 //
 //nolint:govet // fields grouped by role (state, then config) for readability
 type LeastConnLoadBalancer struct {
@@ -39,6 +42,7 @@ type LeastConnLoadBalancer struct {
 type lcPeer struct {
 	target *Target
 	weight int64        // effective weight, >= 1
+	cap    int64        // Target.MaxConcurrent; 0 == unbounded (the bulkhead cap)
 	active atomic.Int64 // in-flight requests
 }
 
@@ -47,6 +51,9 @@ func (l *LeastConnLoadBalancer) init() {
 	for i, t := range l.Targets {
 		l.peers[i].target = t
 		l.peers[i].weight = effectiveWeight(t)
+		if t.MaxConcurrent > 0 { // <= 0 stays 0 (unbounded); read once, never on the hot path
+			l.peers[i].cap = int64(t.MaxConcurrent)
+		}
 	}
 }
 
@@ -59,8 +66,12 @@ func (l *LeastConnLoadBalancer) RoundTrip(r *http.Request) (*http.Response, erro
 		return nil, ErrUnavailable
 	}
 
-	p := l.pick(n)
-	p.active.Add(1)
+	p, ok := l.pick(n)
+	if !ok {
+		return nil, ErrUnavailable // every target at its MaxConcurrent cap -> shed (503)
+	}
+	// pick already claimed the slot (active +1) atomically, so the cap is never
+	// exceeded; the matching decrement is the dec below (panic-safe + at body close).
 
 	var once sync.Once
 	dec := func() { once.Do(func() { p.active.Add(-1) }) }
@@ -102,24 +113,69 @@ func (l *LeastConnLoadBalancer) RoundTrip(r *http.Request) (*http.Response, erro
 	return resp, nil
 }
 
-// pick scans for the target with the lowest active/weight, starting from a
-// rotating cursor so equal-load targets are served round-robin. The comparison
-// cross-multiplies (a/c.weight < bestA/best.weight  <=>  a*best.weight <
-// bestA*c.weight) to stay integer-only; with realistic weights and concurrency the
-// int64 products have ample headroom. It does atomic loads only — a momentary
-// near-tie that misroutes self-corrects on the next pick.
-func (l *LeastConnLoadBalancer) pick(n int) *lcPeer {
+// pick selects the least-loaded target that is UNDER its bulkhead cap and
+// atomically claims a slot on it (active +1), so the slot is already held on
+// return. It scans from a rotating cursor so equal-load targets are served
+// round-robin, comparing active/weight via cross-multiplication (a/c.weight <
+// bestA/best.weight  <=>  a*best.weight < bestA*c.weight) to stay integer-only.
+// Targets at/over their cap are skipped; if every target is at its cap it returns
+// ok=false and RoundTrip sheds (ErrUnavailable). The selection scan is read-only
+// (atomic loads); only the claim mutates.
+//
+// pick is lock-free, not bounded by n scans: a re-scan happens only after a claim
+// CAS observed the chosen peer already at cap, and concurrent releases make the
+// candidate set non-monotonic. But total in-flight is bounded by sum(cap) and every
+// losing CAS corresponds to a sibling that made progress (a claim or release), so
+// the system is livelock-free.
+func (l *LeastConnLoadBalancer) pick(n int) (*lcPeer, bool) {
 	start := l.i.Add(1) - 1
-	best := &l.peers[start%uint32(n)]
-	bestA := best.active.Load()
-	for k := uint32(1); k < uint32(n); k++ {
-		c := &l.peers[(start+k)%uint32(n)]
-		a := c.active.Load()
-		if a*best.weight < bestA*c.weight {
-			best, bestA = c, a
+	for {
+		var best *lcPeer
+		var bestA int64
+		for k := uint32(0); k < uint32(n); k++ {
+			// uint64 so start+k can't wrap mid-scan when the cursor is near
+			// MaxUint32: a uint32 add there would alias an index and skip a real
+			// peer, false-shedding (503) if the skipped peer was the lone under-cap one.
+			c := &l.peers[(uint64(start)+uint64(k))%uint64(n)]
+			a := c.active.Load()
+			if c.cap != 0 && a >= c.cap {
+				continue // at/over the bulkhead cap: skip, try the next target
+			}
+			if best == nil || a*best.weight < bestA*c.weight {
+				best, bestA = c, a
+			}
 		}
+		if best == nil {
+			return nil, false // every target saturated -> shed
+		}
+		if l.claim(best, bestA) {
+			return best, true
+		}
+		// best filled between the read and the CAS; re-scan (it will now be skipped).
 	}
-	return best
+}
+
+// claim atomically takes a slot on p if it is still under its cap, given the load
+// pick already observed in expected. cap == 0 is unbounded (a plain increment, the
+// uncapped fast path — behaviorally identical to today's leastconn). Otherwise the
+// CAS commits only against the exact value observed, so the cap is HARD: under a
+// burst active can never exceed cap. A CAS lost to a sibling release retries on the
+// same peer (still the best choice); a peer that has since filled returns false so
+// pick re-scans for another under-cap target.
+func (l *LeastConnLoadBalancer) claim(p *lcPeer, expected int64) bool {
+	if p.cap == 0 {
+		p.active.Add(1)
+		return true
+	}
+	for {
+		if expected >= p.cap {
+			return false // filled; caller re-scans
+		}
+		if p.active.CompareAndSwap(expected, expected+1) {
+			return true
+		}
+		expected = p.active.Load() // lost the CAS to a sibling; re-read this peer
+	}
 }
 
 // lcBody decrements the target's active count when the response body is closed.
