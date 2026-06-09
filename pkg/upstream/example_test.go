@@ -114,6 +114,24 @@ func ExampleNewCircuitBreakingLoadBalancer() {
 	s.Use(upstream.New(lb))
 }
 
+// Catch a "gray failure" — a backend still returning 200s but far slower than its
+// peers — that error-based ejection misses. A target whose mean latency exceeds
+// EjectionFactor x the pool median is ejected and re-probed. A uniform slowdown
+// ejects no one (it self-tunes against the pool median).
+func ExampleNewLatencyEjectingLoadBalancer() {
+	tr := &upstream.HTTPTransport{}
+	lb := upstream.NewLatencyEjectingLoadBalancer([]*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+		{Host: "10.0.0.3:8080", Transport: tr},
+	})
+	lb.EjectionFactor = 3      // eject a target 3x slower than the pool median
+	lb.HalfLife = 10 * time.Second
+
+	s := parapet.New()
+	s.Use(upstream.New(lb))
+}
+
 // Observe each origin round-trip via OnRoundTrip — invoked once per attempt with
 // the resolved target, status, latency, and error. Wire it to metrics or logging
 // (see prom.Upstream); here it just inspects the info.
