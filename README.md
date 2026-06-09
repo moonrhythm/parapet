@@ -39,6 +39,7 @@ Each subdirectory under `pkg/` is a self-contained middleware:
 | [`location`](pkg/location) | Path routing — exact, prefix, and regexp matchers |
 | [`router`](pkg/router) | Simple URL router |
 | [`block`](pkg/block) | Conditional middleware container — match a request, then apply an inner chain |
+| [`mirror`](pkg/mirror) | Traffic shadowing — tee a copy of matched/sampled requests to a canary, fire-and-forget |
 | [`ratelimit`](pkg/ratelimit) | Fixed-window, sliding-window, concurrent, and leaky-bucket limiters |
 | [`compress`](pkg/compress) | Content-negotiated compression (Gzip, Brotli, Deflate) |
 | [`cache`](pkg/cache) | HTTP response cache — honor-origin policy, in-memory or disk backend, single-flight fills, `X-Cache` tag |
@@ -529,6 +530,34 @@ and targets begin **up** by default (`StartUnhealthy` flips to fail-closed) so a
 misconfigured probe path cannot black-hole a fresh deploy. The probe uses `http`;
 for a target on the dynamic multi-scheme `Transport` set `ahc.Scheme` to `"h2c"` or
 `"unix"` (the dedicated transports force their own scheme and ignore it).
+
+## Traffic mirroring (shadowing)
+
+`mirror.New` tees a copy of matched/sampled **requests** to a separate destination
+(a "canary") so you can exercise a new build with real production traffic. It is
+**fire-and-forget**: the primary request and its response are never affected — a
+mirror that is slow, queue-full, or panicking is dropped or recovered, never
+propagated. The canary's response is discarded.
+
+```go
+mr := mirror.New()
+mr.Match = func(r *http.Request) bool { return r.Method == http.MethodGet }
+mr.SampleRate = 0.1                  // shadow 10% of matched requests
+mr.Observe = prom.Mirror()           // optional outcome/latency metrics
+mr.Use(upstream.SingleHost("canary:8080", &upstream.HTTPTransport{}))
+
+s.Use(mr)                            // tees, then falls through to the real chain
+s.Use(upstream.SingleHost("prod:8080", &upstream.HTTPTransport{}))
+```
+
+A fixed worker pool (`Workers`, default 8) bounds mirror concurrency; a full
+`QueueSize` queue drops rather than blocking. The request body is buffered up front
+(bounded by `MaxBodyBytes`) so the primary and the mirror read byte-identical bytes;
+an over-cap body skips the mirror. Each mirror runs on a detached
+`context.Background()` deadline (`Timeout`), so a client disconnect never cancels it.
+The mirrored request is marked (`X-Mirror: 1` by default; `DisableMark` to go fully
+transparent) so the canary can no-op side effects. End-to-end credentials are
+replayed by design — use `Match` to exclude sensitive routes.
 
 ## Trusted proxies
 
