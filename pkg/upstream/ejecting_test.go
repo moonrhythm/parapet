@@ -18,13 +18,17 @@ import (
 type fakeUpstream struct {
 	calls  atomic.Int64
 	down   atomic.Bool
-	status int // response status when up; 0 means 200
+	delay  atomic.Int64 // response delay in nanos (for latency tests); 0 = none
+	status int          // response status when up; 0 means 200
 }
 
 func (t *fakeUpstream) RoundTrip(*http.Request) (*http.Response, error) {
 	t.calls.Add(1)
 	if t.down.Load() {
 		return nil, errors.New("dial tcp: connection refused")
+	}
+	if d := t.delay.Load(); d > 0 {
+		time.Sleep(time.Duration(d))
 	}
 	w := httptest.NewRecorder()
 	if t.status != 0 {

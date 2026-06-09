@@ -440,6 +440,25 @@ Use `EjectingLoadBalancer` when you want fail-*open* (keep routing during a tota
 outage); use `CircuitBreakingLoadBalancer` when you want fail-*fast* (shed load).
 The same `IsFailure` hook applies. Both ignore `Target.Weight`.
 
+`upstream.NewLatencyEjectingLoadBalancer` catches what those two miss — a **gray
+failure**, a backend still returning 200s but far slower than its peers. A target
+whose decayed mean time-to-first-byte exceeds `EjectionFactor` × the **pool median**
+is ejected and re-probed. Because the test is relative to the pool, it self-tunes: a
+uniform slowdown raises every target and the median together, so no one is an
+outlier (guard rails — a max-ejection cap and a panic threshold — keep a systemic
+slowdown from draining the pool). It is latency-only: pair it with the circuit
+breaker or `EjectingLoadBalancer` for error ejection.
+
+```go
+lb := upstream.NewLatencyEjectingLoadBalancer([]*upstream.Target{
+	{Host: "10.0.0.1:8080", Transport: &upstream.HTTPTransport{}},
+	{Host: "10.0.0.2:8080", Transport: &upstream.HTTPTransport{}},
+	{Host: "10.0.0.3:8080", Transport: &upstream.HTTPTransport{}},
+})
+lb.EjectionFactor = 3 // eject a target 3× slower than the pool median
+s.Use(upstream.New(lb))
+```
+
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.
