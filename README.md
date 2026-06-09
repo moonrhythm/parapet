@@ -417,6 +417,29 @@ Pair it with `prom.Upstream()` (wired into `Upstream.OnRoundTrip`) to watch
 ejections take effect: traffic shifts off a failing backend in
 `parapet_upstream_requests{host,status}`.
 
+`upstream.NewCircuitBreakingLoadBalancer` goes a step further: it **fails fast**.
+An open target is rejected *without a round-trip* (so a request never pays the
+dead backend's connect+timeout), and when every target is open it returns 503
+rather than failing open — shedding load instead of hammering a dead origin.
+After `FailureThreshold` consecutive failures a target opens for `OpenTimeout`
+(doubling per repeat trip, up to `MaxOpenTimeout`), then admits a small half-open
+trickle (`HalfOpenMaxProbes`) to test recovery: `SuccessThreshold` successes close
+it, one failure re-opens it.
+
+```go
+lb := upstream.NewCircuitBreakingLoadBalancer([]*upstream.Target{
+	{Host: "10.0.0.1:8080", Transport: &upstream.HTTPTransport{}},
+	{Host: "10.0.0.2:8080", Transport: &upstream.HTTPTransport{}},
+})
+lb.FailureThreshold = 5
+lb.OpenTimeout = 5 * time.Second
+s.Use(upstream.New(lb))
+```
+
+Use `EjectingLoadBalancer` when you want fail-*open* (keep routing during a total
+outage); use `CircuitBreakingLoadBalancer` when you want fail-*fast* (shed load).
+The same `IsFailure` hook applies. Both ignore `Target.Weight`.
+
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.

@@ -94,6 +94,26 @@ func ExampleNewEjectingLoadBalancer() {
 	s.Use(upstream.New(lb))
 }
 
+// Add circuit breaking: a target that fails repeatedly is opened and REJECTED
+// without a round-trip (fail fast), then probed for recovery via a half-open
+// trickle. Unlike ejection, when every target is open it returns 503 rather than
+// hammering a dead origin. Here IsFailure also counts 5xx as failures.
+func ExampleNewCircuitBreakingLoadBalancer() {
+	tr := &upstream.HTTPTransport{}
+	lb := upstream.NewCircuitBreakingLoadBalancer([]*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+	})
+	lb.FailureThreshold = 5
+	lb.OpenTimeout = 10 * time.Second
+	lb.IsFailure = func(resp *http.Response, err error) bool {
+		return err != nil || (resp != nil && resp.StatusCode >= 500)
+	}
+
+	s := parapet.New()
+	s.Use(upstream.New(lb))
+}
+
 // Observe each origin round-trip via OnRoundTrip — invoked once per attempt with
 // the resolved target, status, latency, and error. Wire it to metrics or logging
 // (see prom.Upstream); here it just inspects the info.
