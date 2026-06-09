@@ -132,6 +132,24 @@ func ExampleNewLatencyEjectingLoadBalancer() {
 	s.Use(upstream.New(lb))
 }
 
+// Cut tail latency by hedging: wrap any balancer so a slow idempotent request is
+// duplicated to another target after HedgeDelay, taking the first response. It
+// composes with every balancer (here round-robin). If the wrapped balancer uses a
+// custom IsFailure, exclude context.Canceled so cancelled losing legs don't eject
+// the healthy backend they raced.
+func ExampleNewHedgingLoadBalancer() {
+	tr := &upstream.HTTPTransport{}
+	lb := upstream.NewRoundRobinLoadBalancer([]*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+	})
+	h := upstream.NewHedgingLoadBalancer(lb)
+	h.HedgeDelay = 30 * time.Millisecond // ~p95; <= 0 disables
+
+	s := parapet.New()
+	s.Use(upstream.New(h)) // h is the proxy's transport, like any balancer
+}
+
 // Observe each origin round-trip via OnRoundTrip — invoked once per attempt with
 // the resolved target, status, latency, and error. Wire it to metrics or logging
 // (see prom.Upstream); here it just inspects the info.

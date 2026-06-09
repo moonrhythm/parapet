@@ -463,6 +463,26 @@ lb.EjectionFactor = 3 // eject a target 3× slower than the pool median
 s.Use(upstream.New(lb))
 ```
 
+## Hedging (speculative retry)
+
+`upstream.NewHedgingLoadBalancer` wraps any balancer to cut **tail latency**: if an
+idempotent, body-less request hasn't responded within `HedgeDelay`, it sends a
+duplicate to another target (the wrapped balancer self-selects a different one),
+returns whichever response arrives first, and cancels the loser. The race happens
+inside the `RoundTripper`, so the proxy only ever sees the winner.
+
+```go
+h := upstream.NewHedgingLoadBalancer(lb) // lb is any balancer
+h.HedgeDelay = 30 * time.Millisecond     // ~p95; <= 0 disables (zero-cost pass-through)
+s.Use(upstream.New(h))
+```
+
+`MaxHedge` (default 1) caps the fan-out. Non-idempotent requests, and a request
+already inside the retry loop, pass straight through. Because losing legs are
+cancelled with `context.Canceled`, a custom `IsFailure` on the wrapped balancer
+must exclude it (the default does), or hedging would slowly eject the healthy
+backend it raced.
+
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.
