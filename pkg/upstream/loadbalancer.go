@@ -61,21 +61,46 @@ func NewRoundRobinLoadBalancer(targets []*Target) *RoundRobinLoadBalancer {
 }
 
 // RoundRobinLoadBalancer strategy
+//
+//nolint:govet // fields grouped by role (state, then config) for readability
 type RoundRobinLoadBalancer struct {
+	i    uint32
+	gate []atomic.Bool // active-HC gate; nil = all up (installed before serving)
+
 	Targets []*Target
-	i       uint32
 }
 
-// RoundTrip sends a request to upstream server
+// RoundTrip sends a request to the next upstream server in round-robin order,
+// skipping any the active-HC gate marks down; if every target is down it falls open
+// to the next slot so traffic is never fully black-holed.
 func (l *RoundRobinLoadBalancer) RoundTrip(r *http.Request) (*http.Response, error) {
-	if len(l.Targets) == 0 {
+	n := len(l.Targets)
+	if n == 0 {
 		return nil, ErrUnavailable
 	}
 
-	i := atomic.AddUint32(&l.i, 1) - 1
-	i %= uint32(len(l.Targets))
-	t := l.Targets[i]
+	start := atomic.AddUint32(&l.i, 1) - 1
+	t := l.Targets[start%uint32(n)] // fail-open default if every target is gated down
+	for k := uint32(0); k < uint32(n); k++ {
+		idx := (start + k) % uint32(n)
+		if l.up(idx) {
+			t = l.Targets[idx]
+			break
+		}
+	}
 
 	r.URL.Host = t.Host
 	return t.Transport.RoundTrip(r)
+}
+
+// setHealthGate installs the active health-check gate (see ActiveHealthCheck).
+func (l *RoundRobinLoadBalancer) setHealthGate(gate []atomic.Bool) { l.gate = gate }
+
+// up reports the active-HC verdict for target index i. A nil gate means "always
+// up", so the hot path is unchanged for callers not using active health checks. An
+// out-of-range i — a gate sized to fewer targets than the balancer, i.e. a violated
+// co-construction contract — is also treated as up, so a mis-wire fails open rather
+// than panicking on the hot path.
+func (l *RoundRobinLoadBalancer) up(i uint32) bool {
+	return l.gate == nil || int(i) >= len(l.gate) || l.gate[i].Load()
 }

@@ -491,6 +491,45 @@ cancelled with `context.Canceled`, a custom `IsFailure` on the wrapped balancer
 must exclude it (the default does), or hedging would slowly eject the healthy
 backend it raced.
 
+## Active health checks
+
+The balancers above are **passive** — they learn a target is unhealthy only from
+real traffic's failures. `upstream.NewActiveHealthCheck` adds **active** probing:
+it wraps any balancer and probes each target out-of-band (one background goroutine
+per target), routing only to those answering. Pass the **same** `[]*Target` to both
+the balancer and the wrapper so their indices line up:
+
+```go
+targets := []*upstream.Target{
+	{Host: "10.0.0.1:8080", Transport: tr},
+	{Host: "10.0.0.2:8080", Transport: tr},
+}
+ahc := upstream.NewActiveHealthCheck(targets, upstream.NewRoundRobinLoadBalancer(targets))
+ahc.Path = "/healthz"
+ahc.Interval = 5 * time.Second
+ahc.UnhealthyThld = 3 // down after 3 consecutive failed probes; HealthyThld re-admits
+s.Use(upstream.New(ahc))
+```
+
+Active and passive **compose**: the health gate only *removes* candidates, and the
+wrapped balancer keeps its own strategy over the survivors — a weighted balancer
+keeps its exact ratio, the circuit breaker still trips, least-conn still balances.
+A target must pass **both** to be picked. When the gate marks **every** target down,
+each balancer falls back to its own all-down policy: round-robin / ejecting /
+latency-ejecting / least-conn route best-effort (so a broken probe path can't 503 a
+whole healthy pool), while the circuit breaker still sheds. (Least-conn still sheds
+on its *capacity* cap — `MaxConcurrent` — independently of health.)
+
+Probing auto-starts on the first request and, when served by a `parapet.Server`,
+stops on graceful shutdown. For a bare `RoundTripper`, or to bound the prober's
+lifetime explicitly, call `ahc.Start(ctx)` before serving and `ahc.Close()` after.
+By default a slot probes through each `Target.Transport` (exercising the real pool);
+set `ProbeTransport` to isolate probe traffic. A held probe is bounded by `Timeout`,
+and targets begin **up** by default (`StartUnhealthy` flips to fail-closed) so a
+misconfigured probe path cannot black-hole a fresh deploy. The probe uses `http`;
+for a target on the dynamic multi-scheme `Transport` set `ahc.Scheme` to `"h2c"` or
+`"unix"` (the dedicated transports force their own scheme and ignore it).
+
 ## Trusted proxies
 
 Parapet only reads `X-Forwarded-*` and `X-Real-IP` when the connection comes from a trusted CIDR. Configure trust with `TrustCIDRs(...)` or accept the defaults from `Trusted()` (standard private and loopback ranges). Servers created with `NewFrontend()` start with no trusted proxies by default.

@@ -63,6 +63,7 @@ type LatencyEjectingLoadBalancer struct {
 	i     atomic.Uint32 // round-robin cursor
 	tau   float64       // HalfLife / ln2, precomputed in init
 	peers []latPeer     // per-target state, built in init
+	gate  []atomic.Bool // active-HC gate; nil = all up (installed before serving)
 
 	// Targets is the set of upstreams to balance across.
 	Targets []*Target
@@ -209,12 +210,22 @@ func (l *LatencyEjectingLoadBalancer) pick(n int) *latPeer {
 		return &l.peers[start%uint32(n)] // panic: distrust the signal, spread to all
 	}
 	for k := uint32(0); k < uint32(n); k++ {
-		p := &l.peers[(start+k)%uint32(n)]
-		if p.ejectedUntil.Load() <= now {
+		idx := (start + k) % uint32(n)
+		p := &l.peers[idx]
+		if p.ejectedUntil.Load() <= now && l.up(idx) { // not latency-ejected AND active-HC up
 			return p
 		}
 	}
-	return &l.peers[start%uint32(n)] // all ejected -> fail open
+	return &l.peers[start%uint32(n)] // all ejected/down -> fail open (slow beats 503)
+}
+
+// setHealthGate installs the active health-check gate (see ActiveHealthCheck).
+func (l *LatencyEjectingLoadBalancer) setHealthGate(gate []atomic.Bool) { l.gate = gate }
+
+// up reports the active-HC verdict for target index i. A nil gate means "always
+// up", so the hot path is unchanged for callers not using active health checks.
+func (l *LatencyEjectingLoadBalancer) up(i uint32) bool {
+	return l.gate == nil || int(i) >= len(l.gate) || l.gate[i].Load() // out-of-range => up (fail open, no panic)
 }
 
 // record feeds a completed round-trip's latency into the target's EWMA and runs the
