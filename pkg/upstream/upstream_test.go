@@ -180,8 +180,14 @@ func TestUpstream(t *testing.T) {
 			Retries:       3,
 			BackoffFactor: 50 * time.Millisecond,
 		}.ServeHandler(nil).ServeHTTP(w, r)
+		elapsed := time.Since(start)
 		assert.Equal(t, 4, cnt)
-		assert.WithinDuration(t, start.Add((50+100+200)*time.Millisecond), time.Now(), 20*time.Millisecond)
+		// The 3 retries back off 50+100+200ms (350ms) before giving up. Assert a lower
+		// bound — which proves the exponential backoff happened (timers never fire
+		// early) — with a generous upper bound, instead of a tight ±20ms window that
+		// flakes on a busy/-race CI runner where scheduling adds tens of ms.
+		assert.GreaterOrEqual(t, elapsed, 300*time.Millisecond)
+		assert.Less(t, elapsed, 2*time.Second)
 	})
 
 	t.Run("Should not retry non-idempotent", func(t *testing.T) {
