@@ -1,0 +1,122 @@
+package upstream_test
+
+import (
+	"net/http"
+	"time"
+
+	"github.com/moonrhythm/parapet"
+	"github.com/moonrhythm/parapet/pkg/upstream"
+)
+
+// Proxy every request to one backend. SingleHost is the common case: pick a
+// transport for the wire protocol (HTTPTransport for plain HTTP/1.1 here) and
+// point it at a host:port. The returned *Upstream is a parapet.Middleware.
+func ExampleSingleHost() {
+	s := parapet.New()
+	s.Use(upstream.SingleHost("10.0.0.1:8080", &upstream.HTTPTransport{}))
+}
+
+// Tune the proxy and its transport: rewrite the upstream Host header, prefix a
+// target path, cap the retry budget, and bound the dial / response timeouts.
+func ExampleUpstream() {
+	m := upstream.SingleHost("10.0.0.1:8080", &upstream.HTTPTransport{
+		DialTimeout:           2 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		MaxIdleConns:          64,
+	})
+	m.Host = "api.internal" // Host header sent to the backend
+	m.Path = "/v1"          // prefix joined ahead of the request path
+	m.Retries = 2           // idempotent requests only; 0 disables retries
+	m.BackoffFactor = 100 * time.Millisecond
+
+	s := parapet.New()
+	s.Use(m)
+}
+
+// Spread requests across a pool with plain round-robin. Each Target pairs a
+// host:port with the transport used to reach it; upstream.New wraps the balancer
+// (itself an http.RoundTripper) as the proxy's transport.
+func ExampleNewRoundRobinLoadBalancer() {
+	tr := &upstream.HTTPTransport{}
+	lb := upstream.NewRoundRobinLoadBalancer([]*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+		{Host: "10.0.0.3:8080", Transport: tr},
+	})
+
+	s := parapet.New()
+	s.Use(upstream.New(lb))
+}
+
+// Bias traffic by capacity with weighted round-robin: a Weight of 3 receives
+// three times the request share of a Weight of 1.
+func ExampleNewWeightedRoundRobinLoadBalancer() {
+	tr := &upstream.HTTPTransport{}
+	lb := upstream.NewWeightedRoundRobinLoadBalancer([]*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr, Weight: 3}, // larger box
+		{Host: "10.0.0.2:8080", Transport: tr, Weight: 1},
+	})
+
+	s := parapet.New()
+	s.Use(upstream.New(lb))
+}
+
+// Route by live concurrency: each request goes to the target holding the fewest
+// in-flight requests (scaled by Weight), which adapts to slow backends better
+// than counting requests.
+func ExampleNewLeastConnLoadBalancer() {
+	tr := &upstream.HTTPTransport{}
+	lb := upstream.NewLeastConnLoadBalancer([]*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+	})
+
+	s := parapet.New()
+	s.Use(upstream.New(lb))
+}
+
+// Add passive health checking: a target that returns repeated failures is
+// ejected from rotation for a backed-off cooldown. Here IsFailure also counts
+// 5xx responses, not just transport errors.
+func ExampleNewEjectingLoadBalancer() {
+	tr := &upstream.HTTPTransport{}
+	lb := upstream.NewEjectingLoadBalancer([]*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+	})
+	lb.MaxFails = 5
+	lb.EjectTimeout = 10 * time.Second
+	lb.IsFailure = func(resp *http.Response, err error) bool {
+		return err != nil || (resp != nil && resp.StatusCode >= 500)
+	}
+
+	s := parapet.New()
+	s.Use(upstream.New(lb))
+}
+
+// Observe each origin round-trip via OnRoundTrip — invoked once per attempt with
+// the resolved target, status, latency, and error. Wire it to metrics or logging
+// (see prom.Upstream); here it just inspects the info.
+func ExampleUpstream_onRoundTrip() {
+	m := upstream.SingleHost("10.0.0.1:8080", &upstream.HTTPTransport{})
+	m.OnRoundTrip = func(r *http.Request, info upstream.RoundTripInfo) {
+		_ = info.Host     // resolved upstream target
+		_ = info.Status   // response status, or 0 on a pre-response failure
+		_ = info.Duration // time to response headers
+		_ = info.Err      // transport error, or nil once a response arrived
+	}
+
+	s := parapet.New()
+	s.Use(m)
+}
+
+// Pick the transport for the backend's protocol. Transport auto-selects per the
+// request URL scheme (http/https, h2c for cleartext HTTP/2, unix sockets), so one
+// instance can front a mixed pool; the dedicated transports pin a single protocol.
+func ExampleTransport() {
+	s := parapet.New()
+	s.Use(upstream.SingleHost("10.0.0.1:8080", &upstream.Transport{
+		MaxIdleConns:       64,
+		DisableCompression: true,
+	}))
+}
