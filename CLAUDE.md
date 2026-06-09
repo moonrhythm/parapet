@@ -40,6 +40,7 @@ Each subdirectory under `pkg/` is a self-contained middleware or feature:
 | `host` | Virtual-host routing — matches `Host` header with optional wildcard prefixes. |
 | `location` | Path routing — exact, prefix, and regex matchers. |
 | `block` | Conditional middleware container: match a request, then apply its own inner chain. |
+| `mirror` | Traffic shadowing: tee a copy of matched/sampled requests to a canary chain, fire-and-forget, on a fixed worker pool. Never affects the primary. |
 | `ratelimit` | Fixed-window (per-second/minute/hour), concurrent, and leaky-bucket limiters. |
 | `compress` | Content-negotiated compression: Gzip, Brotli, Deflate. |
 | `headers` | Request/response header manipulation (set, delete, copy). |
