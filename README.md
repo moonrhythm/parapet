@@ -39,7 +39,7 @@ Each subdirectory under `pkg/` is a self-contained middleware:
 | [`location`](pkg/location) | Path routing — exact, prefix, and regexp matchers |
 | [`router`](pkg/router) | Simple URL router |
 | [`block`](pkg/block) | Conditional middleware container — match a request, then apply an inner chain |
-| [`ratelimit`](pkg/ratelimit) | Fixed-window, concurrent, and leaky-bucket limiters |
+| [`ratelimit`](pkg/ratelimit) | Fixed-window, sliding-window, concurrent, and leaky-bucket limiters |
 | [`compress`](pkg/compress) | Content-negotiated compression (Gzip, Brotli, Deflate) |
 | [`cache`](pkg/cache) | HTTP response cache — honor-origin policy, in-memory or disk backend, single-flight fills, `X-Cache` tag |
 | [`cache/purge`](pkg/cache/purge) | Cache invalidation — purge by host, URL, path prefix, or surrogate tag, plus a reaper |
