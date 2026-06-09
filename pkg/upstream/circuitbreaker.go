@@ -123,6 +123,12 @@ type CircuitBreakingLoadBalancer struct {
 	// breaker toward closing rather than being treated as neutral (a wrongly closed
 	// but still-broken target simply re-trips on the next real failure).
 	IsFailure func(resp *http.Response, err error) bool
+
+	// OnStateChange observes per-target circuit state transitions (nil disables);
+	// see prom.UpstreamState. It is fired synchronously from the goroutine that
+	// commits the transition, exactly once per transition, after the new state is
+	// published. The callee owns its own concurrency.
+	OnStateChange StateChangeFunc
 }
 
 // cbState is one target's circuit-breaker state. word is the single source of
@@ -256,7 +262,9 @@ func (l *CircuitBreakingLoadBalancer) admit(b *cbState, now int64) (uint32, cbAd
 			// so winner and losers admit uniformly (no thundering herd, and no
 			// successes/probe pre-claim race).
 			b.halfOpenSince.Store(now)
-			b.word.CompareAndSwap(v, cbPack(gen+1, 0, cbHalfOpen))
+			if b.word.CompareAndSwap(v, cbPack(gen+1, 0, cbHalfOpen)) {
+				l.emit(b, StateOpen, StateHalfOpen, ReasonProbe) // single CAS winner
+			}
 			continue
 
 		default: // cbHalfOpen
@@ -265,7 +273,7 @@ func (l *CircuitBreakingLoadBalancer) admit(b *cbState, now int64) (uint32, cbAd
 				// ProbeTimeout (a hung, never-returning round-trip), re-arming the
 				// cooldown; the stale probe's eventual record is generation-inert.
 				if now-b.halfOpenSince.Load() > int64(l.ProbeTimeout) {
-					l.transition(b, gen, cbHalfOpen, cbOpen)
+					l.transition(b, gen, cbHalfOpen, cbOpen, ReasonExpire)
 					continue
 				}
 				return 0, 0, false // fail fast, skip
@@ -290,9 +298,9 @@ func (l *CircuitBreakingLoadBalancer) record(b *cbState, gen uint32, adm cbAdmis
 	if adm == cbAdmitProbe {
 		switch {
 		case failed:
-			l.transition(b, gen, cbHalfOpen, cbOpen) // re-open; word-CAS reclaims all slots
+			l.transition(b, gen, cbHalfOpen, cbOpen, ReasonReopen) // re-open; word-CAS reclaims all slots
 		case int(b.successes.Add(1)) >= l.SuccessThreshold:
-			l.transition(b, gen, cbHalfOpen, cbClosed) // heal; word-CAS reclaims all slots
+			l.transition(b, gen, cbHalfOpen, cbClosed, ReasonHeal) // heal; word-CAS reclaims all slots
 		default:
 			l.releaseProbe(b, gen) // sub-threshold success: free just this slot
 		}
@@ -306,7 +314,7 @@ func (l *CircuitBreakingLoadBalancer) record(b *cbState, gen uint32, adm cbAdmis
 			// threshold-crossers collapses to exactly one trip per down-window.
 			g, _, state := cbUnpack(b.word.Load())
 			if state == cbClosed {
-				l.transition(b, g, cbClosed, cbOpen)
+				l.transition(b, g, cbClosed, cbOpen, ReasonTrip)
 			}
 		}
 		return
@@ -325,6 +333,25 @@ func (l *CircuitBreakingLoadBalancer) failed(resp *http.Response, err error) boo
 	return err != nil && !errors.Is(err, context.Canceled)
 }
 
+// cbExternal maps the internal packed state to the public State.
+func cbExternal(s uint64) State {
+	switch s {
+	case cbOpen:
+		return StateOpen
+	case cbHalfOpen:
+		return StateHalfOpen
+	default:
+		return StateClosed
+	}
+}
+
+// emit reports a state transition to OnStateChange, if set.
+func (l *CircuitBreakingLoadBalancer) emit(b *cbState, from, to State, reason Reason) {
+	if l.OnStateChange != nil {
+		l.OnStateChange(StateChange{Host: b.target.Host, From: from, To: to, Reason: reason})
+	}
+}
+
 // transition advances a breaker from (gen, from) to (gen+1, next), zeroing the
 // probe count and the satellite counters. It is a no-op if the breaker has already
 // left (gen, from) — so concurrent callers collapse to exactly one transition per
@@ -332,7 +359,7 @@ func (l *CircuitBreakingLoadBalancer) failed(resp *http.Response, err error) boo
 // that observes OPEN is guaranteed (SC atomics) to read the fresh cooldown deadline
 // rather than a stale-expired one; generations is committed only after the CAS wins
 // so a lost race never over-counts the backoff exponent.
-func (l *CircuitBreakingLoadBalancer) transition(b *cbState, gen uint32, from, next uint64) bool {
+func (l *CircuitBreakingLoadBalancer) transition(b *cbState, gen uint32, from, next uint64, reason Reason) bool {
 	var until int64
 	var e int32
 	if next == cbOpen {
@@ -359,6 +386,7 @@ func (l *CircuitBreakingLoadBalancer) transition(b *cbState, gen uint32, from, n
 				b.generations.Store(0)
 				b.openedUntil.Store(0)
 			}
+			l.emit(b, cbExternal(from), cbExternal(next), reason) // one event per generation edge
 			return true
 		}
 		// CAS failed because a sibling changed the probes field at the same

@@ -120,13 +120,19 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 
 // RoundTrip wraps transport round-trip
 func (m *Upstream) RoundTrip(r *http.Request) (*http.Response, error) {
+	// The transport (load balancer / single-host) sets the resolved target. Clear it
+	// first so a request shed before any pick (a reliability balancer returning
+	// ErrUnavailable) reports an empty host, not a stale target left from a prior
+	// retry attempt — making the fast-reject metric's host label unambiguous.
+	r.URL.Host = ""
 	start := time.Now()
 	resp, err := m.Transport.RoundTrip(r)
 	logger.Set(r.Context(), "upstream", r.URL.Host)
 	if m.OnRoundTrip != nil {
-		// r.URL.Host is the target the load balancer / single-host transport just
-		// resolved; Duration is the time to response headers, before the body streams.
-		info := RoundTripInfo{Host: r.URL.Host, Duration: time.Since(start), Err: err}
+		// r.URL.Host is the target just resolved; Duration is the time to response
+		// headers, before the body streams; Attempt is the retry index (0 first try).
+		attempt, _ := r.Context().Value(retryContextKey{}).(int)
+		info := RoundTripInfo{Host: r.URL.Host, Duration: time.Since(start), Err: err, Attempt: attempt}
 		if resp != nil {
 			info.Status = resp.StatusCode
 		}

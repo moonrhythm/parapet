@@ -117,6 +117,12 @@ type LatencyEjectingLoadBalancer struct {
 
 	// MaxEjectTimeout caps the ejection cooldown. Defaults to 5m.
 	MaxEjectTimeout time.Duration
+
+	// OnStateChange observes a target being ejected (ReasonEject) or healed back into
+	// rotation (ReasonRecover); nil disables it. Like EjectingLoadBalancer, it
+	// reflects committed eject/recover events, not cooldown-expiry rotation
+	// membership. See prom.UpstreamState. The callee owns its own concurrency.
+	OnStateChange StateChangeFunc
 }
 
 // latPeer holds one target's latency-ejection state. ewmaBits is the single source
@@ -320,8 +326,12 @@ func (l *LatencyEjectingLoadBalancer) ejectedCount(now int64) (c int) {
 // dropout cannot reset the backoff of a genuinely-slow host.
 func (l *LatencyEjectingLoadBalancer) maybeHeal(p *latPeer) {
 	if p.ejections.Load() != 0 || p.ejectedUntil.Load() != 0 {
+		// Swap so exactly one concurrent healer emits ReasonRecover (the winner).
+		wasEjected := p.ejectedUntil.Swap(0) != 0
 		p.ejections.Store(0)
-		p.ejectedUntil.Store(0)
+		if wasEjected && l.OnStateChange != nil {
+			l.OnStateChange(StateChange{Host: p.target.Host, From: StateOpen, To: StateClosed, Reason: ReasonRecover})
+		}
 	}
 }
 
@@ -344,6 +354,13 @@ func (l *LatencyEjectingLoadBalancer) eject(p *latPeer) {
 			p.ejections.Store(e)
 			p.ewmaBits.Store(0) // re-probe seeds fresh
 			p.samples.Store(0)  // re-probe must re-accumulate MinSamples before re-eligible
+			if l.OnStateChange != nil {
+				from := StateClosed
+				if prev != 0 {
+					from = StateOpen
+				}
+				l.OnStateChange(StateChange{Host: p.target.Host, From: from, To: StateOpen, Reason: ReasonEject})
+			}
 			return
 		}
 	}

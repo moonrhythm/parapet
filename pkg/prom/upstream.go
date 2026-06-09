@@ -1,6 +1,7 @@
 package prom
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"sync"
@@ -12,9 +13,10 @@ import (
 
 //nolint:govet
 type upstreamMetrics struct {
-	once     sync.Once
-	requests *prometheus.CounterVec
-	duration *prometheus.HistogramVec
+	once        sync.Once
+	requests    *prometheus.CounterVec
+	duration    *prometheus.HistogramVec
+	fastRejects *prometheus.CounterVec
 }
 
 var _upstream upstreamMetrics
@@ -30,7 +32,11 @@ func (p *upstreamMetrics) init() {
 			Name:      "upstream_request_duration_seconds",
 			Buckets:   prometheus.DefBuckets,
 		}, []string{"host"})
-		reg.MustRegister(p.requests, p.duration)
+		p.fastRejects = prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: Namespace,
+			Name:      "upstream_fast_rejects_total",
+		}, []string{"host"})
+		reg.MustRegister(p.requests, p.duration, p.fastRejects)
 	})
 }
 
@@ -50,6 +56,14 @@ func (p *upstreamMetrics) observe(_ *http.Request, info upstream.RoundTripInfo) 
 	if h, err := p.duration.GetMetricWith(prometheus.Labels{"host": info.Host}); err == nil {
 		h.Observe(info.Duration.Seconds())
 	}
+	// Fast-reject: a reliability balancer shed the request before any round-trip
+	// (Upstream.RoundTrip then leaves host empty). errors.Is so a wrapped
+	// ErrUnavailable still counts.
+	if errors.Is(info.Err, upstream.ErrUnavailable) {
+		if c, err := p.fastRejects.GetMetricWith(prometheus.Labels{"host": info.Host}); err == nil {
+			c.Inc()
+		}
+	}
 }
 
 // Upstream returns an upstream.RoundTripFunc that records per-backend origin
@@ -66,6 +80,10 @@ func (p *upstreamMetrics) observe(_ *http.Request, info upstream.RoundTripInfo) 
 //	     an origin-error rate is sum(status=~"5..") + sum(status="error"))
 //	{namespace}_upstream_request_duration_seconds{host}         histogram of TTFB
 //	    (transport round-trip latency: connect + send + time to response headers)
+//	{namespace}_upstream_fast_rejects_total{host}               counter of requests
+//	    a reliability balancer shed before any round-trip (ErrUnavailable). The host
+//	    is "" for a shed before any pick; pair with prom.UpstreamState for circuit
+//	    and ejection state.
 //
 // It fires once per attempt, so retries are counted individually. The host label is
 // the resolved upstream target (operator-configured, bounded), distinct from the
