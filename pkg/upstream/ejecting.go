@@ -42,6 +42,7 @@ type EjectingLoadBalancer struct {
 	once    sync.Once
 	i       atomic.Uint32
 	targets []*ejectTarget
+	gate    []atomic.Bool // active-HC gate; nil = all up (installed before serving)
 
 	// Targets is the set of upstreams to balance across.
 	Targets []*Target
@@ -116,18 +117,29 @@ func (l *EjectingLoadBalancer) RoundTrip(r *http.Request) (*http.Response, error
 }
 
 // pick selects the next selectable target in round-robin order, skipping
-// ejected ones. If all targets are ejected it falls open to the round-robin
-// pick so traffic is never fully black-holed.
+// ejected ones AND any the active-HC gate marks down. If all targets are
+// out it falls open to the round-robin pick so traffic is never fully
+// black-holed.
 func (l *EjectingLoadBalancer) pick(n int) *ejectTarget {
 	start := l.i.Add(1) - 1
 	now := time.Now().UnixNano()
 	for k := uint32(0); k < uint32(n); k++ {
-		t := l.targets[(start+k)%uint32(n)]
-		if t.ejectedUntil.Load() <= now {
+		idx := (start + k) % uint32(n)
+		t := l.targets[idx]
+		if t.ejectedUntil.Load() <= now && l.up(idx) { // passive AND active
 			return t
 		}
 	}
 	return l.targets[start%uint32(n)]
+}
+
+// setHealthGate installs the active health-check gate (see ActiveHealthCheck).
+func (l *EjectingLoadBalancer) setHealthGate(gate []atomic.Bool) { l.gate = gate }
+
+// up reports the active-HC verdict for target index i. A nil gate means "always
+// up", so the hot path is unchanged for callers not using active health checks.
+func (l *EjectingLoadBalancer) up(i uint32) bool {
+	return l.gate == nil || int(i) >= len(l.gate) || l.gate[i].Load() // out-of-range => up (fail open, no panic)
 }
 
 // record updates a target's health from a round-trip result.

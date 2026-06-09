@@ -85,6 +85,7 @@ type CircuitBreakingLoadBalancer struct {
 	once     sync.Once
 	i        atomic.Uint32 // round-robin cursor
 	breakers []cbState     // per-target FSM, built in init()
+	gate     []atomic.Bool // active-HC gate; nil = all up (installed before serving)
 
 	// Targets is the set of upstreams to balance across.
 	Targets []*Target
@@ -230,12 +231,25 @@ func (l *CircuitBreakingLoadBalancer) pick(n int) (*cbState, uint32, cbAdmission
 	start := l.i.Add(1) - 1
 	now := time.Now().UnixNano()
 	for k := uint32(0); k < uint32(n); k++ {
-		b := &l.breakers[(start+k)%uint32(n)]
+		idx := (start + k) % uint32(n)
+		if !l.up(idx) {
+			continue // active-HC says down: skip without admitting
+		}
+		b := &l.breakers[idx]
 		if gen, adm, ok := l.admit(b, now); ok {
 			return b, gen, adm, true
 		}
 	}
-	return nil, 0, 0, false
+	return nil, 0, 0, false // all open, probe-saturated, or gated down -> shed (503)
+}
+
+// setHealthGate installs the active health-check gate (see ActiveHealthCheck).
+func (l *CircuitBreakingLoadBalancer) setHealthGate(gate []atomic.Bool) { l.gate = gate }
+
+// up reports the active-HC verdict for target index i. A nil gate means "always
+// up", so the hot path is unchanged for callers not using active health checks.
+func (l *CircuitBreakingLoadBalancer) up(i uint32) bool {
+	return l.gate == nil || int(i) >= len(l.gate) || l.gate[i].Load() // out-of-range => up (fail open, no panic)
 }
 
 // admit decides whether the breaker will accept a request now. CLOSED always

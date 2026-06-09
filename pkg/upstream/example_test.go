@@ -156,6 +156,27 @@ func ExampleNewHedgingLoadBalancer() {
 	s.Use(upstream.New(h)) // h is the proxy's transport, like any balancer
 }
 
+// Add ACTIVE health checking: probe each target out-of-band and route only to those
+// answering, on top of any balancer's own (passive) strategy. Pass the SAME []*Target
+// to both the balancer and the wrapper so the health gate's indices line up. Active
+// HC only removes candidates; the balancer keeps its strategy over the survivors and
+// composes with passive ejection. When served by a parapet.Server it stops on
+// graceful shutdown automatically; call Start(ctx)/Close() for explicit control.
+func ExampleNewActiveHealthCheck() {
+	tr := &upstream.HTTPTransport{}
+	targets := []*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+	}
+	ahc := upstream.NewActiveHealthCheck(targets, upstream.NewRoundRobinLoadBalancer(targets))
+	ahc.Path = "/healthz"
+	ahc.Interval = 5 * time.Second
+	ahc.UnhealthyThld = 3 // down after 3 consecutive failed probes
+
+	s := parapet.New()
+	s.Use(upstream.New(ahc)) // ahc is the proxy's transport, like any balancer
+}
+
 // Observe each origin round-trip via OnRoundTrip — invoked once per attempt with
 // the resolved target, status, latency, and error. Wire it to metrics or logging
 // (see prom.Upstream); here it just inspects the info.

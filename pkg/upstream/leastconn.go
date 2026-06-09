@@ -33,6 +33,7 @@ type LeastConnLoadBalancer struct {
 	once  sync.Once
 	i     atomic.Uint32 // rotation cursor for breaking equal-load ties
 	peers []lcPeer
+	gate  []atomic.Bool // active-HC gate; nil = all up (installed before serving)
 
 	// Targets is the set of upstreams to balance across.
 	Targets []*Target
@@ -129,14 +130,28 @@ func (l *LeastConnLoadBalancer) RoundTrip(r *http.Request) (*http.Response, erro
 // the system is livelock-free.
 func (l *LeastConnLoadBalancer) pick(n int) (*lcPeer, bool) {
 	start := l.i.Add(1) - 1
+	// failOpen ignores the active-HC gate for this pick. It engages only when the
+	// gate has marked EVERY target down: a saturated-but-healthy pool sheds (the
+	// bulkhead contract), but a fully probe-dark pool routes best-effort rather than
+	// 503ing on a possibly-broken probe path. Nil gate => never engages, zero cost.
+	failOpen := false
 	for {
 		var best *lcPeer
 		var bestA int64
+		sawUp := false // any gate-up peer seen THIS scan (whether or not under cap)
 		for k := uint32(0); k < uint32(n); k++ {
 			// uint64 so start+k can't wrap mid-scan when the cursor is near
 			// MaxUint32: a uint32 add there would alias an index and skip a real
 			// peer, false-shedding (503) if the skipped peer was the lone under-cap one.
-			c := &l.peers[(uint64(start)+uint64(k))%uint64(n)]
+			idx := uint32((uint64(start) + uint64(k)) % uint64(n))
+			c := &l.peers[idx]
+			if !failOpen {
+				if l.up(idx) {
+					sawUp = true
+				} else {
+					continue // active-HC down: skip (unless the whole pool is dark)
+				}
+			}
 			a := c.active.Load()
 			if c.cap != 0 && a >= c.cap {
 				continue // at/over the bulkhead cap: skip, try the next target
@@ -146,13 +161,33 @@ func (l *LeastConnLoadBalancer) pick(n int) (*lcPeer, bool) {
 			}
 		}
 		if best == nil {
-			return nil, false // every target saturated -> shed
+			// Nothing selectable in THIS snapshot. sawUp distinguishes the two reasons
+			// from the SAME scan (no second scan to race a concurrent gate flip): if no
+			// peer was even up, the pool is dark -> fail open and re-scan ignoring the
+			// gate; if some peer WAS up (just saturated), that's the bulkhead capacity
+			// shed. A nil gate makes sawUp always true, so it sheds exactly as before.
+			if !failOpen && !sawUp {
+				failOpen = true
+				continue
+			}
+			return nil, false // saturated, or down-and-saturated -> shed
 		}
 		if l.claim(best, bestA) {
 			return best, true
 		}
 		// best filled between the read and the CAS; re-scan (it will now be skipped).
 	}
+}
+
+// setHealthGate installs the active health-check gate (see ActiveHealthCheck).
+func (l *LeastConnLoadBalancer) setHealthGate(gate []atomic.Bool) { l.gate = gate }
+
+// up reports the active-HC verdict for target index i. A nil gate means "always
+// up", so the hot path is unchanged for callers not using active health checks. An
+// out-of-range i (a gate sized to fewer targets than the balancer) is also treated
+// as up, so a mis-wire fails open rather than panicking on the hot path.
+func (l *LeastConnLoadBalancer) up(i uint32) bool {
+	return l.gate == nil || int(i) >= len(l.gate) || l.gate[i].Load()
 }
 
 // claim atomically takes a slot on p if it is still under its cap, given the load
