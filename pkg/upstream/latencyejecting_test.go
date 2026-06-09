@@ -3,6 +3,7 @@ package upstream
 import (
 	"math"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -249,10 +250,40 @@ func TestLatencyPoolMedian(t *testing.T) {
 func TestLatencyEjectingConcurrent(t *testing.T) {
 	t.Parallel()
 	slow := &fakeUpstream{}
-	slow.delay.Store(int64(latSlow))
+	// A clear outlier (much slower than its peers) so the verdict survives -race
+	// timing noise: under -race the "fast" peers' measured latency rises, lifting the
+	// pool median, so a small gap can leave the slow one under the EjectionFactor bar.
+	slow.delay.Store(int64(30 * time.Millisecond))
 	l := latTestLB(newEjectTargets(slow, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
-	hammer(l, 16, 200*time.Millisecond)
-	assert.True(t, latEjected(l, 0), "the slow target ends ejected under concurrency")
+	l.MinSamples = 10
+	l.EjectTimeout = time.Minute // sticky: once ejected it stays, so the check never races a re-admit
+	l.once.Do(l.init)            // build peers now so the poll goroutine never races lazy init
+
+	// Hammer in the background and poll for ejection (rather than asserting at one
+	// racy instant, where the slow target may be momentarily re-admitted/re-probing).
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				resp, _ := l.RoundTrip(httptest.NewRequest("GET", "/", nil))
+				if resp != nil {
+					resp.Body.Close()
+				}
+			}
+		}()
+	}
+	require.Eventually(t, func() bool { return latEjected(l, 0) }, 3*time.Second, 10*time.Millisecond,
+		"the slow target gets ejected under concurrency")
+	close(stop)
+	wg.Wait()
 }
 
 func TestLatencyEjectingPickZeroAlloc(t *testing.T) {
