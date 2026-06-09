@@ -14,8 +14,8 @@ type Target struct {
 	// WeightedRoundRobinLoadBalancer gives it a proportionally larger share of the
 	// request COUNT; LeastConnLoadBalancer lets it hold a proportionally larger
 	// share of concurrent in-flight requests. Values <= 0 are treated as 1.
-	// RoundRobinLoadBalancer and EjectingLoadBalancer ignore this field and weight
-	// every target equally.
+	// RoundRobinLoadBalancer, EjectingLoadBalancer, and CircuitBreakingLoadBalancer
+	// ignore this field and weight every target equally.
 	Weight int
 }
 
