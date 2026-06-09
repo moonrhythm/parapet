@@ -65,10 +65,16 @@ func ExampleNewWeightedRoundRobinLoadBalancer() {
 // in-flight requests (scaled by Weight), which adapts to slow backends better
 // than counting requests.
 func ExampleNewLeastConnLoadBalancer() {
-	tr := &upstream.HTTPTransport{}
+	// MaxConcurrent caps each target's in-flight requests (the bulkhead pattern):
+	// the cap is hard, surplus routes to an under-cap target, and once every target
+	// is full the balancer sheds with 503. A held slot is freed only when the body
+	// is closed, so bound TOTAL request time (a request-context deadline the
+	// transport honors) to keep a stalled backend from latching the cap — a
+	// response-header timeout alone does not (see the Target.MaxConcurrent docs).
+	tr := &upstream.HTTPTransport{ResponseHeaderTimeout: 5 * time.Second}
 	lb := upstream.NewLeastConnLoadBalancer([]*upstream.Target{
-		{Host: "10.0.0.1:8080", Transport: tr},
-		{Host: "10.0.0.2:8080", Transport: tr},
+		{Host: "10.0.0.1:8080", Transport: tr, MaxConcurrent: 100},
+		{Host: "10.0.0.2:8080", Transport: tr, MaxConcurrent: 100},
 	})
 
 	s := parapet.New()
