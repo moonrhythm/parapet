@@ -79,6 +79,10 @@ func TestLatencyEjectingLoadBalancer(t *testing.T) {
 		slow.delay.Store(int64(latSlow))
 		fast := []*fakeUpstream{slow, {}, {}, {}, {}}
 		l := latTestLB(newEjectTargets(fast...))
+		// Sticky cooldown: the slow target need only cross the ejection bar ONCE during
+		// the drive and then stays ejected, so the assert cannot race a re-admission /
+		// re-probe (which resets samples) when -race stretches the synchronous drive.
+		l.EjectTimeout = time.Minute
 		driveLB(l, 300)
 		assert.True(t, latEjected(l, 0), "the slow target is ejected")
 		for i := 1; i < 5; i++ {
@@ -149,6 +153,7 @@ func TestLatencyEjectingLoadBalancer(t *testing.T) {
 		slow := &fakeUpstream{}
 		slow.delay.Store(int64(latSlow))
 		l := latTestLB(newEjectTargets(slow, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
+		l.EjectTimeout = time.Minute // sticky (see DetectsAndEjectsTheSlowOne)
 		driveLB(l, 300)
 		require.True(t, latEjected(l, 0))
 		driveLB(l, 300)
