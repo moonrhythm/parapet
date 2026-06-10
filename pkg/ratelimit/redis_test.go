@@ -91,13 +91,21 @@ func TestRedisFixedWindowAdmitsThenDenies(t *testing.T) {
 	assert.True(t, b.Take("a"))
 	assert.True(t, b.Take("a"))
 	assert.False(t, b.Take("a"), "3rd over Max=2 denied")
-	assert.True(t, b.Take("b"), "a different key is independent")
 
-	// The key is namespaced and epoch-suffixed.
-	epoch := time.Now().UnixNano() / int64(time.Hour)
+	// The key is namespaced and epoch-suffixed. Take reads the clock internally, so
+	// bracket it with both candidate epochs: if the top of the hour falls between
+	// Take's read and ours, the suffix is e1 or e2 (e2-e1 <= 1 for any stall under an
+	// hour) — a single post-hoc epoch read raced that crossing.
+	e1 := time.Now().UnixNano() / int64(time.Hour)
+	assert.True(t, b.Take("b"), "a different key is independent")
+	e2 := time.Now().UnixNano() / int64(time.Hour)
+
 	require.Len(t, f.lastKeys, 1)
 	assert.True(t, strings.HasPrefix(f.lastKeys[0], "parapet:rl:"), "default prefix")
-	assert.True(t, strings.HasSuffix(f.lastKeys[0], ":"+strconv.FormatInt(epoch, 10)), "epoch suffix")
+	assert.True(t,
+		strings.HasSuffix(f.lastKeys[0], ":"+strconv.FormatInt(e1, 10)) ||
+			strings.HasSuffix(f.lastKeys[0], ":"+strconv.FormatInt(e2, 10)),
+		"epoch suffix (either side of a possible hour crossing)")
 	assert.Contains(t, f.lastKeys[0], "b")
 }
 
@@ -133,14 +141,28 @@ func TestRedisFixedWindowRollsToFreshWindow(t *testing.T) {
 	const size = 50 * time.Millisecond
 	b := &RedisFixedWindowStrategy{Runner: f, Max: 1, Size: size}
 
-	// Align to just after a window boundary so the two same-window Takes below cannot
-	// straddle one (epochs are absolute now/Size, not relative to the first call).
-	now := time.Now().UnixNano()
-	time.Sleep(time.Duration((now/int64(size)+1)*int64(size) - now))
-
-	require.True(t, b.Take("k"))
-	require.False(t, b.Take("k"), "window exhausted")
-	time.Sleep(size) // cross into the next epoch
+	// Epochs are absolute now/Size and Take reads the clock internally, so a scheduler
+	// stall between the two Takes can push the second into a fresh epoch (which admits
+	// and breaks the exhaustion assert). Bracket the pair with epoch reads — e1 == e2
+	// proves both internal reads shared one window — and retry on a straddle: each
+	// attempt re-aligns to the NEXT boundary, so its epoch key is always virgin (a
+	// straddled prior attempt only ever incremented strictly earlier epochs).
+	var ok1, ok2, sameEpoch bool
+	for range 5 {
+		now := time.Now().UnixNano()
+		time.Sleep(time.Duration((now/int64(size)+1)*int64(size) - now))
+		e1 := time.Now().UnixNano() / int64(size)
+		ok1 = b.Take("k")
+		ok2 = b.Take("k")
+		if e2 := time.Now().UnixNano() / int64(size); e1 == e2 {
+			sameEpoch = true
+			break
+		}
+	}
+	require.True(t, sameEpoch, "could not land both Takes in one 50ms epoch after 5 attempts")
+	require.True(t, ok1)
+	require.False(t, ok2, "window exhausted")
+	time.Sleep(size) // cross into the next epoch (one-sided safe: any later epoch is fresh)
 	assert.True(t, b.Take("k"), "a fresh epoch key starts at 0")
 }
 
@@ -160,17 +182,22 @@ func TestRedisFixedWindowAfterEpochAnchored(t *testing.T) {
 	t.Parallel()
 	for _, size := range []time.Duration{time.Second, 7 * time.Second, 13 * time.Minute, time.Hour} {
 		b := &RedisFixedWindowStrategy{Runner: newFakeRedis(), Max: 1, Size: size}
-		now := time.Now()
+		before := time.Now()
 		got := b.After("k")
-		// After reads the clock again internally; if that read crossed an epoch
-		// boundary (astronomically rare), `want` and `got` reference different windows.
-		// Skip that vanishing case rather than flake.
-		if now.UnixNano()/int64(size) != time.Now().UnixNano()/int64(size) {
+		after := time.Now()
+		// After's internal clock read lies in [before, after]. If both brackets share
+		// an epoch, the internal read does too, and since After is strictly decreasing
+		// within an epoch, got must land in [end-after, end-before] — bounds that hold
+		// under ARBITRARY stalls, unlike the old fixed 5ms delta off a single pre-call
+		// read (the want-got gap there was exactly the inter-read stall). Skip only the
+		// vanishing boundary-crossing case.
+		if before.UnixNano()/int64(size) != after.UnixNano()/int64(size) {
 			continue
 		}
-		epoch := now.UnixNano() / int64(size)
-		want := time.Unix(0, (epoch+1)*int64(size)).Sub(now)
-		assert.InDelta(t, float64(want), float64(got), float64(5*time.Millisecond),
+		end := time.Unix(0, (before.UnixNano()/int64(size)+1)*int64(size))
+		assert.LessOrEqual(t, got, end.Sub(before),
+			"After is anchored to the integer epoch boundary for Size=%s", size)
+		assert.GreaterOrEqual(t, got, end.Sub(after),
 			"After is anchored to the integer epoch boundary for Size=%s", size)
 		assert.Positive(t, got)
 		assert.LessOrEqual(t, got, size)

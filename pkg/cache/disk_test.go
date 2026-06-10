@@ -33,7 +33,12 @@ func TestDisk_RestartPersistence(t *testing.T) {
 	assert.Equal(t, "HIT", r.Header().Get("X-Cache"), "survived restart")
 	assert.EqualValues(t, 0, atomic.LoadInt32(&callsB), "served from disk, origin not contacted")
 
-	assert.Eventually(t, func() bool { return b.lru.size() > 0 }, time.Second, 10*time.Millisecond,
+	// 2s matches the repo's Eventually norm (1s was an outlier that an fsync- or
+	// scheduler-stalled background scan could overrun under -race CI load). The
+	// condition is monotonic, so a longer budget has zero false-pass risk. Kept
+	// async on purpose: this is the only coverage that NewDisk launches the
+	// startup scan goroutine at all.
+	assert.Eventually(t, func() bool { return b.lru.size() > 0 }, 2*time.Second, 10*time.Millisecond,
 		"startup scan re-seeds the LRU byte accounting")
 }
 

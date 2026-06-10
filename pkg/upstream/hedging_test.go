@@ -111,7 +111,10 @@ func TestHedging_PrimaryWinsNoHedge(t *testing.T) {
 	fast := &ctxFake{}
 	hedge := &ctxFake{}
 	h := NewHedgingLoadBalancer(rrLB(fast, hedge))
-	h.HedgeDelay = 200 * time.Millisecond // primary returns well within this
+	// The no-hedge property must hold at any scheduler speed: a real 200ms timer can
+	// beat a stalled primary leg under -race contention and spuriously launch the
+	// hedge, so make the timer unreachable instead of racing it.
+	h.HedgeDelay = time.Hour
 	resp, err := h.RoundTrip(httptest.NewRequest("GET", "/", nil))
 	require.NoError(t, err)
 	resp.Body.Close()
@@ -124,7 +127,7 @@ func TestHedging_FailFastOnError(t *testing.T) {
 	boom := &ctxFake{err: errors.New("dial fail")} // primary errors immediately
 	fast := &ctxFake{}
 	h := NewHedgingLoadBalancer(rrLB(boom, fast))
-	h.HedgeDelay = 500 * time.Millisecond // long: only fail-fast can make the hedge fire quickly
+	h.HedgeDelay = 10 * time.Second // long: only fail-fast can make the hedge fire quickly
 	h.HedgeOnError = true
 
 	start := time.Now()
@@ -132,7 +135,13 @@ func TestHedging_FailFastOnError(t *testing.T) {
 	elapsed := time.Since(start)
 	require.NoError(t, err, "the hedge wins after the primary errors")
 	resp.Body.Close()
-	assert.Less(t, elapsed, 200*time.Millisecond, "the hedge fired immediately on the error, not after HedgeDelay")
+	assert.EqualValues(t, 1, boom.calls.Load(), "the primary leg ran (and errored)")
+	assert.EqualValues(t, 1, fast.calls.Load(), "exactly one hedge leg served the winner")
+	// Bound the duration against the config, not a magic constant: the old
+	// 200ms-vs-500ms discriminator was bridgeable by scheduler stalls alone. A broken
+	// fail-fast fires the hedge on the ~10s timer and fails this cleanly, while the
+	// pass-side jitter margin is now 5s — out of reach of any realistic stall.
+	assert.Less(t, elapsed, h.HedgeDelay/2, "the hedge fired on the error, not after HedgeDelay")
 }
 
 func TestHedging_AllFailReturnsError(t *testing.T) {

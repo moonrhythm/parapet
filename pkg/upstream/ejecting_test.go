@@ -106,18 +106,25 @@ func TestEjectingLoadBalancer(t *testing.T) {
 		t0, t1 := &fakeUpstream{}, &fakeUpstream{}
 		t0.down.Store(true)
 		l := &EjectingLoadBalancer{
-			Targets:      newEjectTargets(t0, t1),
-			MaxFails:     3,
-			EjectTimeout: 20 * time.Millisecond,
+			Targets:  newEjectTargets(t0, t1),
+			MaxFails: 3,
+			// Sticky cooldown: with a real 20ms window, a single >=20ms scheduler stall
+			// between the ejecting drive and the "still ejected" drive lets pick()
+			// re-admit the still-down target and fail the equality assert.
+			EjectTimeout: time.Hour,
 		}
 
 		drive(l, 6) // eject t0
 		ejected := t0.calls.Load()
 		drive(l, 4)
 		assert.Equal(t, ejected, t0.calls.Load(), "still ejected")
+		assert.Greater(t, l.targets[0].ejectedUntil.Load(), time.Now().UnixNano(), "eject set a future deadline")
 
 		t0.down.Store(false)
-		time.Sleep(40 * time.Millisecond) // let the cooldown expire
+		// Expire the cooldown deterministically by rewinding the deadline instead of
+		// sleeping past a real window (the latencyejecting_test.go pattern). A NONZERO
+		// past value, not 0, so recovery still exercises the wasEjected/ReasonRecover path.
+		l.targets[0].ejectedUntil.Store(time.Now().UnixNano() - 1)
 		drive(l, 6)
 		assert.Greater(t, t0.calls.Load(), ejected, "target back in rotation after cooldown")
 	})

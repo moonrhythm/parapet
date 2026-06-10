@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	. "github.com/moonrhythm/parapet/pkg/ratelimit"
 )
@@ -56,43 +55,10 @@ func TestSlidingWindowBurstAdmitsExactlyMax(t *testing.T) {
 	assert.Zero(t, b.After("other"), "an unknown key can take now")
 }
 
-// TestSlidingWindowSuppressesBoundaryBurst is the integration proof, through the
-// public Take across a REAL window roll, that the previous window's spent budget
-// suppresses the up-to-2x burst a fixed window admits at its boundary. Timing-loose
-// by construction (the assertion tolerates landing anywhere in the first ~90% of the
-// next window); the exact smoothing math is pinned deterministically in the internal
-// tests.
-func TestSlidingWindowSuppressesBoundaryBurst(t *testing.T) {
-	t.Parallel()
-
-	const max = 10
-	size := 100 * time.Millisecond
-	b := &SlidingWindowStrategy{Max: max, Size: size}
-
-	// Land ~2ms into a fresh window so the fill below stays within one window.
-	now := time.Now().UnixNano()
-	toBoundary := (now/int64(size)+1)*int64(size) - now
-	time.Sleep(time.Duration(toBoundary) + 2*time.Millisecond)
-
-	filled := 0
-	for range 100 {
-		if b.Take("k") {
-			filled++
-		}
-	}
-	require.Equal(t, max, filled, "window N admits exactly Max")
-
-	// Cross into window N+1 (prev is now Max) and hammer immediately: a fixed window
-	// would grant another fresh Max here; the sliding window must admit far fewer.
-	time.Sleep(size)
-	burst := 0
-	for range 100 {
-		if b.Take("k") {
-			burst++
-		}
-	}
-	assert.Less(t, burst, max, "the previous window suppresses the boundary burst (no 2x)")
-}
+// TestSlidingWindowSuppressesBoundaryBurst lives in slidingwindow_internal_test.go:
+// the real-clock version here raced 100ms wall-clock windows against the scheduler
+// (a ~100ms stall mid-loop straddled a boundary and broke both phases); the internal
+// version seeds the rolled state deterministically and still drives the public Take.
 
 // TestSlidingWindowMaxZero: a zero limit admits nothing (the honest reading,
 // matching FixedWindow's no-magic-default stance).

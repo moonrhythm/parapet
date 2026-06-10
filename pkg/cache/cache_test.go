@@ -73,15 +73,21 @@ func do(c *Cache, h http.Handler, method, target string, reqHeader http.Header) 
 
 // eachBackend runs fn against both storage backends so the middleware behavior is
 // verified identically for memory and disk.
+//
+// LockTimeout is pinned far above any real fill duration so the single-flight
+// collapse tests can't flake when a slow CI leader (origin sleep + disk fsyncs
+// under -race) stretches a fill past the 2s production default and pushes
+// followers into self-fetch. Timeout behavior itself is covered by
+// TestCache_LockTimeoutConfigurable, which builds its own cache.
 func eachBackend(t *testing.T, fn func(t *testing.T, c *Cache)) {
 	t.Helper()
 	t.Run("memory", func(t *testing.T) {
-		fn(t, New(NewMemory(1<<20), Options{MaxFileSize: 1024}))
+		fn(t, New(NewMemory(1<<20), Options{MaxFileSize: 1024, LockTimeout: 30 * time.Second}))
 	})
 	t.Run("disk", func(t *testing.T) {
 		d, err := NewDisk(t.TempDir(), 1<<20)
 		require.NoError(t, err)
-		fn(t, New(d, Options{MaxFileSize: 1024}))
+		fn(t, New(d, Options{MaxFileSize: 1024, LockTimeout: 30 * time.Second}))
 	})
 }
 
@@ -270,30 +276,68 @@ func TestCache_SingleFlightCollapsesCrossVariant(t *testing.T) {
 
 // A short Options.LockTimeout makes followers give up on a slow leader and fetch
 // the origin themselves rather than wait (the default 2s would collapse them).
+//
+// The origin is gated on channels rather than a 200ms sleep: a sleeping leader
+// raced the followers' arrival (a stalled follower set could wake after the
+// leader's commit and HIT, leaving calls==1). Holding the leader inside the
+// origin until the followers finish makes the timeout path deterministic.
 func TestCache_LockTimeoutConfigurable(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{MaxFileSize: 1024, LockTimeout: 20 * time.Millisecond})
 	var calls int32
-	h := origin(originSpec{body: []byte("slow"), header: hdr("Cache-Control", "max-age=60"), sleep: 200 * time.Millisecond}, &calls)
+	originEntered := make(chan struct{}) // closed when the leader is inside the origin
+	originGate := make(chan struct{})    // leader blocks here until followers finish
+	var leaderOnce sync.Once
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		isLeader := false
+		leaderOnce.Do(func() { isLeader = true; close(originEntered) })
+		if isLeader {
+			<-originGate // hold the fill lock for the whole follower phase
+		}
+		body := []byte("slow")
+		w.Header().Set("Cache-Control", "max-age=60")
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.WriteHeader(200)
+		_, _ = w.Write(body)
+	})
 	mw := c.ServeHandler(h)
 
-	const n = 4
-	var wg, start sync.WaitGroup
-	start.Add(1)
-	for i := 0; i < n; i++ {
+	// Leader first: provably holds the fill lock before any follower starts.
+	leaderDone := make(chan struct{})
+	go func() {
+		defer close(leaderDone)
+		rec := httptest.NewRecorder()
+		mw.ServeHTTP(rec, httptest.NewRequest("GET", "http://acme.com/s", nil))
+		assert.Equal(t, "slow", rec.Body.String())
+	}()
+	<-originEntered
+
+	// Followers: the leader cannot commit, so each MUST take the timeout path and
+	// fetch the (ungated for them) origin itself.
+	startT := time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			start.Wait()
 			rec := httptest.NewRecorder()
 			mw.ServeHTTP(rec, httptest.NewRequest("GET", "http://acme.com/s", nil))
 			assert.Equal(t, "slow", rec.Body.String())
 		}()
 	}
-	start.Done()
 	wg.Wait()
-	// The leader's 200ms fill far exceeds the 20ms timeout, so followers don't wait
-	// for it — they each contact the origin.
-	assert.Greater(t, atomic.LoadInt32(&calls), int32(1), "short LockTimeout: followers fetch the origin instead of waiting")
+	elapsed := time.Since(startT)
+	close(originGate)
+	<-leaderDone
+
+	// 1 leader + 3 followers, deterministically.
+	assert.EqualValues(t, 4, atomic.LoadInt32(&calls), "short LockTimeout: every follower fetched the origin instead of waiting")
+	// Sensitivity guard: if LockTimeout were ignored, all three followers would wait
+	// the full 2s default (concurrently) before self-fetching, so ANY bound < 2s
+	// detects the regression. 1.5s keeps a 0.5s guard band while tolerating ~1.5s of
+	// scheduler stall over a nominal ~22ms phase — the bound itself must not become
+	// the flake.
+	assert.Less(t, elapsed, 1500*time.Millisecond, "followers honored the configured 20ms LockTimeout, not the 2s default")
 }
 
 func TestCache_ExpiredEntryIsMiss(t *testing.T) {
@@ -637,10 +681,14 @@ func TestCache_HitCarriesAgeHeader(t *testing.T) {
 		req := httptest.NewRequest("GET", "http://acme.com/age", nil)
 		primary := c.primaryHash(req)
 		key := c.variantHash(primary, req)
+		// Anchor both seeded timestamps to one instant so the upper Age bound can
+		// be derived from measured elapsed time — a fixed `age <= 31` raced the
+		// real clock against storePut's disk fsyncs plus the request cycle.
+		seedAt := time.Now()
 		storePut(t, c.storage, key, Meta{
 			Status: 200, Header: http.Header{}, PrimaryHex: primary,
-			Created:    time.Now().Add(-30 * time.Second).UnixNano(),
-			FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3,
+			Created:    seedAt.Add(-30 * time.Second).UnixNano(),
+			FreshUntil: seedAt.Add(time.Hour).UnixNano(), Size: 3,
 		}, []byte("abc"))
 
 		r := do(c, http.NotFoundHandler(), "GET", "http://acme.com/age", nil)
@@ -648,7 +696,9 @@ func TestCache_HitCarriesAgeHeader(t *testing.T) {
 		age, err := strconv.Atoi(r.Header().Get("Age"))
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, age, 30)
-		assert.LessOrEqual(t, age, 31)
+		// Measured elapsed >= serve-time elapsed, so age = 30+floor(e_serve) is
+		// always <= 30+floor(measured)+1; in a fast run this bound stays ~31.
+		assert.LessOrEqual(t, age, 30+int(time.Since(seedAt).Seconds())+1)
 	})
 }
 
@@ -692,15 +742,18 @@ func TestCache_RangeRequestBypassesCache(t *testing.T) {
 }
 
 // eachBackendDecoupled runs fn against both backends with DecoupleFill enabled.
+// LockTimeout is pinned high for the same reason as eachBackend: a contended fill
+// (LeaderHeadersSanitized) must never push followers into the 2s-default timeout
+// self-fetch path when CI stalls the leader's commit.
 func eachBackendDecoupled(t *testing.T, fn func(t *testing.T, c *Cache)) {
 	t.Helper()
 	t.Run("memory", func(t *testing.T) {
-		fn(t, New(NewMemory(1<<20), Options{MaxFileSize: 1024, DecoupleFill: true}))
+		fn(t, New(NewMemory(1<<20), Options{MaxFileSize: 1024, DecoupleFill: true, LockTimeout: 30 * time.Second}))
 	})
 	t.Run("disk", func(t *testing.T) {
 		d, err := NewDisk(t.TempDir(), 1<<20)
 		require.NoError(t, err)
-		fn(t, New(d, Options{MaxFileSize: 1024, DecoupleFill: true}))
+		fn(t, New(d, Options{MaxFileSize: 1024, DecoupleFill: true, LockTimeout: 30 * time.Second}))
 	})
 }
 
@@ -763,14 +816,19 @@ func TestCache_DecoupleFill_MissThenHit(t *testing.T) {
 // The headline property: under contention, a leader whose own client is blocked
 // must NOT hold the fill lock — followers hit the just-committed entry immediately.
 func TestCache_DecoupleFill_SlowLeaderDoesNotBlockFollowers(t *testing.T) {
-	c := New(NewMemory(1<<20), Options{MaxFileSize: 1 << 20, DecoupleFill: true})
+	// LockTimeout is pinned high so a CI stall between the followers registering
+	// and the leader committing can't push them into the timeout/self-fetch path.
+	c := New(NewMemory(1<<20), Options{MaxFileSize: 1 << 20, DecoupleFill: true, LockTimeout: 30 * time.Second})
 	originEntered := make(chan struct{})
 	originGate := make(chan struct{})
 	var calls int32
+	var enteredOnce sync.Once
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&calls, 1)
-		close(originEntered) // the leader is in origin (single-flight: called once)
-		<-originGate         // hold the leader here so followers can pile onto the lock
+		// Once-guarded so a single-flight regression fails the calls assert below
+		// instead of panicking on a double close.
+		enteredOnce.Do(func() { close(originEntered) }) // the leader is in origin
+		<-originGate                                    // hold the leader here so followers can pile onto the lock
 		w.Header().Set("Cache-Control", "max-age=60")
 		w.Header().Set("Content-Length", "7")
 		w.WriteHeader(200)
@@ -798,7 +856,21 @@ func TestCache_DecoupleFill_SlowLeaderDoesNotBlockFollowers(t *testing.T) {
 			mw.ServeHTTP(recs[i], httptest.NewRequest("GET", "http://acme.com/x", nil))
 		}(i)
 	}
-	time.Sleep(50 * time.Millisecond) // let the followers reach the wait
+	// White-box wait: a fixed sleep here raced follower scheduling — if none had
+	// registered yet, the leader's WriteHeader saw waiters==0 and fell back to
+	// lockstep (wedging on the blocked client while holding the fill lock).
+	// Waiting for waiters==5 proves every follower passed its storage lookup AND
+	// acquire(), so none can wake later as a second leader and re-run the origin.
+	require.Eventually(t, func() bool {
+		c.lockMu.Lock()
+		defer c.lockMu.Unlock()
+		for _, l := range c.locks {
+			if l.waiters.Load() == int32(len(recs)) {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, time.Millisecond, "all followers registered on the fill lock")
 
 	close(originGate) // leader proceeds; WriteHeader sees waiters>0 -> decouple, commit, release
 	fwg.Wait()        // followers complete WITHOUT the leader's blocked client being released
@@ -898,14 +970,28 @@ func decoupledContended(t *testing.T, c *Cache, target string, write func(w http
 	<-originEntered // leader holds the lock, blocked in origin
 
 	var fwg sync.WaitGroup
-	for i := 0; i < 3; i++ {
+	const followers = 3
+	for i := 0; i < followers; i++ {
 		fwg.Add(1)
 		go func() {
 			defer fwg.Done()
 			mw.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", target, nil))
 		}()
 	}
-	time.Sleep(50 * time.Millisecond) // let the followers reach the wait
+	// White-box wait: a fixed sleep here raced follower scheduling — a starved
+	// follower set would make the leader's WriteHeader see waiters==0 and stream
+	// in lockstep (raw headers), silently skipping the decoupled path under test.
+	// The helper drives a single in-flight fill, so c.locks holds exactly one entry.
+	require.Eventually(t, func() bool {
+		c.lockMu.Lock()
+		defer c.lockMu.Unlock()
+		for _, l := range c.locks {
+			if l.waiters.Load() == followers {
+				return true
+			}
+		}
+		return false
+	}, 5*time.Second, time.Millisecond, "followers blocked on the fill lock")
 
 	close(originGate)
 	<-leaderDone

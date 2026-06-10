@@ -75,15 +75,28 @@ func TestLatencyEjectingLoadBalancer(t *testing.T) {
 
 	t.Run("DetectsAndEjectsTheSlowOne", func(t *testing.T) {
 		t.Parallel()
-		slow := &fakeUpstream{}
-		slow.delay.Store(int64(latSlow))
-		fast := []*fakeUpstream{slow, {}, {}, {}, {}}
-		l := latTestLB(newEjectTargets(fast...))
+		l := latTestLB(newEjectTargets(&fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
 		// Sticky cooldown: the slow target need only cross the ejection bar ONCE during
 		// the drive and then stays ejected, so the assert cannot race a re-admission /
 		// re-probe (which resets samples) when -race stretches the synchronous drive.
 		l.EjectTimeout = time.Minute
-		driveLB(l, 300)
+		l.once.Do(l.init)
+		// Feed deterministic synthetic durations through record() instead of timing real
+		// round-trips: observe() seeds the EWMA exactly from the FIRST sample, so a
+		// single >=1.2ms scheduler stall inside a fast peer's first ~µs measured request
+		// would seed it above the ~1ms bar and steal the single MaxEjectionPercent slot
+		// from the slow target before its first eligible record. Constant samples pin
+		// each EWMA at exactly that constant for any decay weight, making the verdict
+		// wall-clock independent while still exercising the MinSamples/MinHosts
+		// eligibility-ordering, poolMedian, and cap paths. (The RoundTrip-times-latency
+		// wiring stays covered by TestLatencyEjectingConcurrent.)
+		resp := httptest.NewRecorder().Result()
+		for range 60 {
+			l.record(&l.peers[0], latSlow, resp, nil) // slow peer first, mirroring pick order
+			for i := 1; i < 5; i++ {
+				l.record(&l.peers[i], 100*time.Microsecond, resp, nil)
+			}
+		}
 		assert.True(t, latEjected(l, 0), "the slow target is ejected")
 		for i := 1; i < 5; i++ {
 			assert.False(t, latEjected(l, i), "fast targets stay in rotation")
@@ -94,14 +107,18 @@ func TestLatencyEjectingLoadBalancer(t *testing.T) {
 		t.Parallel()
 		// THE headline anti-outage-amplifier test: everyone slow by the same amount,
 		// the median rises with them, nobody is an outlier.
-		var trs []*fakeUpstream
-		for range 5 {
-			u := &fakeUpstream{}
-			u.delay.Store(int64(latMild))
-			trs = append(trs, u)
+		l := latTestLB(newEjectTargets(&fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
+		l.once.Do(l.init)
+		// Synthetic constant durations through record(): when timing real round-trips, a
+		// single ~100ms stall inside one peer's measured section near the END of the
+		// drive lifts that EWMA past 3x median and the 30ms cooldown outlives the test.
+		// Identical synthetic samples pin every EWMA at exactly latMild (a convex
+		// combination of equal values), so no stall can manufacture an outlier.
+		// (Deliberately NOT sticky: keep latTestLB's EjectTimeout as-is.)
+		resp := httptest.NewRecorder().Result()
+		for i := range 300 {
+			l.record(&l.peers[i%5], latMild, resp, nil)
 		}
-		l := latTestLB(newEjectTargets(trs...))
-		driveLB(l, 300)
 		assert.Zero(t, latEjectedCount(l), "a uniform slowdown ejects no one")
 	})
 
@@ -148,15 +165,34 @@ func TestLatencyEjectingLoadBalancer(t *testing.T) {
 
 	t.Run("NoOscillationCascade", func(t *testing.T) {
 		t.Parallel()
-		// One clear outlier among otherwise-equal targets; removing it must not make a
+		// One clear outlier among otherwise-similar targets; removing it must not make a
 		// peer the new outlier (the median is robust).
-		slow := &fakeUpstream{}
-		slow.delay.Store(int64(latSlow))
-		l := latTestLB(newEjectTargets(slow, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
+		l := latTestLB(newEjectTargets(&fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
 		l.EjectTimeout = time.Minute // sticky (see DetectsAndEjectsTheSlowOne)
-		driveLB(l, 300)
+		l.once.Do(l.init)
+		// Synthetic durations through record() — same first-sample-poison cap-steal race
+		// as DetectsAndEjectsTheSlowOne (cap = floor(6*0.3) = 1 slot a poisoned fast peer
+		// could consume forever). The fast peers get a small deterministic SPREAD, not
+		// identical latencies, so poolMedian sorts genuinely unequal survivor baselines
+		// in phase 2. (The spread alone cannot flag a non-robust baseline statistic:
+		// MinEjectDelta=1ms floors the bar above every ~100-200µs survivor regardless,
+		// and the sticky-ejected peer 0 holds the single cap slot.)
+		resp := httptest.NewRecorder().Result()
+		fastLat := func(i int) time.Duration { return 100*time.Microsecond + time.Duration(i)*20*time.Microsecond }
+		for range 60 {
+			l.record(&l.peers[0], latSlow, resp, nil)
+			for i := 1; i < 6; i++ {
+				l.record(&l.peers[i], fastLat(i), resp, nil)
+			}
+		}
 		require.True(t, latEjected(l, 0))
-		driveLB(l, 300)
+		// Phase 2: the ejected peer receives no traffic (pick skips it); the survivors
+		// keep their spread of baselines.
+		for range 60 {
+			for i := 1; i < 6; i++ {
+				l.record(&l.peers[i], fastLat(i), resp, nil)
+			}
+		}
 		for i := 1; i < 6; i++ {
 			assert.False(t, latEjected(l, i), "no cascade onto the next-slowest")
 		}
@@ -165,19 +201,53 @@ func TestLatencyEjectingLoadBalancer(t *testing.T) {
 	t.Run("RecoversAfterCooldownNoImmediateReEject", func(t *testing.T) {
 		t.Parallel()
 		// A VERY slow host (the critique's flapping case): it must not re-eject on its
-		// first post-cooldown sample once it has recovered — eject() reseeds the EWMA.
+		// first post-cooldown samples once it has recovered — eject() reseeds the EWMA.
+		// Wall-clock races are designed out: the cooldown is "expired" by rewinding
+		// ejectedUntil (not by sleeping past a real 30ms window the drive can outlast),
+		// and both phases feed deterministic synthetic durations through record() —
+		// timing real 2ms sleeps lets contention inflate the fast peers' sleep-wake
+		// latency multiplicatively, collapsing the 20ms-vs-2ms ratio below the 3x bar
+		// so the host never ejects at all. The peers' baseline stays at latMild (not
+		// ~0µs) so the recovered host sits well under a bar a stale 20ms EWMA (the bug
+		// this guards against) would still trip.
 		slow := &fakeUpstream{}
-		slow.delay.Store(int64(20 * time.Millisecond)) // ~10x the others
-		l := latTestLB(newEjectTargets(slow, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
-		driveLB(l, 200)
+		peers := []*fakeUpstream{slow, {}, {}, {}}
+		l := latTestLB(newEjectTargets(peers...))
+		l.EjectTimeout = time.Minute // sticky (see DetectsAndEjectsTheSlowOne)
+		rec := &stateRecorder{}
+		l.OnStateChange = rec.fn()
+		l.once.Do(l.init)
+		resp := httptest.NewRecorder().Result()
+		for range 50 {
+			for i := 1; i < 4; i++ {
+				l.record(&l.peers[i], latMild, resp, nil)
+			}
+			// Mirror pick() semantics: an ejected peer receives no traffic, so its
+			// stale samples/EWMA must not keep rebuilding after the eject — feeding it
+			// anyway would silently re-arm a phase-2 re-eject and the test would then
+			// pass only via the later heal, not the no-flap property in its name.
+			if !latEjected(l, 0) {
+				l.record(&l.peers[0], 20*time.Millisecond, resp, nil) // ~10x the others
+			}
+		}
 		require.True(t, latEjected(l, 0), "very-slow host is ejected")
 
-		slow.delay.Store(0) // recovered
-		time.Sleep(40 * time.Millisecond) // past the 30ms cooldown
-		base := slow.calls.Load()
-		driveLB(l, 200) // re-probe + accumulate fresh fast samples
-
+		l.peers[0].ejectedUntil.Store(time.Now().UnixNano() - 1) // cooldown elapsed, deterministically
+		for range 50 {                                           // recovered to peer level: fresh post-cooldown samples
+			for i := range 4 {
+				l.record(&l.peers[i], latMild, resp, nil)
+			}
+		}
 		assert.False(t, latEjected(l, 0), "a recovered host is not re-ejected on stale data")
+		// Pin the no-flap property itself: exactly one eject episode, one recovery —
+		// a flap-then-heal implementation cannot sneak past the final state assert.
+		assert.Equal(t, 1, rec.count(ReasonEject), "no second eject on stale data")
+		assert.Equal(t, 1, rec.count(ReasonRecover), "exactly one recovery")
+
+		// And pick() must actually re-admit it: an expired deadline puts it back in
+		// round-robin rotation (real round-trips; ejection already asserted above).
+		base := slow.calls.Load()
+		driveLB(l, 8)
 		assert.Greater(t, slow.calls.Load(), base, "the recovered host serves traffic again")
 	})
 
@@ -255,17 +325,21 @@ func TestLatencyPoolMedian(t *testing.T) {
 func TestLatencyEjectingConcurrent(t *testing.T) {
 	t.Parallel()
 	slow := &fakeUpstream{}
-	// A clear outlier (much slower than its peers) so the verdict survives -race
-	// timing noise: under -race the "fast" peers' measured latency rises, lifting the
-	// pool median, so a small gap can leave the slow one under the EjectionFactor bar.
+	// A clear outlier so the eject path (almost always) runs under the hammer too.
 	slow.delay.Store(int64(30 * time.Millisecond))
 	l := latTestLB(newEjectTargets(slow, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
 	l.MinSamples = 10
-	l.EjectTimeout = time.Minute // sticky: once ejected it stays, so the check never races a re-admit
+	l.EjectTimeout = time.Minute // sticky: once ejected it stays, so the poll never races a re-admit
 	l.once.Do(l.init)            // build peers now so the poll goroutine never races lazy init
 
-	// Hammer in the background and poll for ejection (rather than asserting at one
-	// racy instant, where the slow target may be momentarily re-admitted/re-probing).
+	// This test exists for -race coverage of concurrent pick/observe/eject and for
+	// the RoundTrip-measures-and-records wiring. It does NOT assert the ejection
+	// verdict: under heavy co-test contention every MEASURED latency inflates by
+	// scheduler stall, so the slow:median ratio can sit under EjectionFactor for the
+	// whole deadline and an "eventually ejected" assert flakes (observed under a
+	// 6-package -race stress). The verdict is asserted deterministically with
+	// synthetic samples in DetectsAndEjectsTheSlowOne; here we assert only facts
+	// that hold at any execution speed.
 	stop := make(chan struct{})
 	var wg sync.WaitGroup
 	for range 16 {
@@ -285,8 +359,21 @@ func TestLatencyEjectingConcurrent(t *testing.T) {
 			}
 		}()
 	}
-	require.Eventually(t, func() bool { return latEjected(l, 0) }, 3*time.Second, 10*time.Millisecond,
-		"the slow target gets ejected under concurrency")
+	require.Eventually(t, func() bool {
+		for i := 1; i < len(l.peers); i++ {
+			// A "fast" peer whose first measured sample caught a scheduler stall can
+			// itself be ejected (seed poison) — eject() zeroes its EWMA and, sticky,
+			// it never records again. ejectedUntil != 0 proves the full
+			// record->eject pipeline ran for it, which is the wiring fact we want.
+			if l.peers[i].ewmaBits.Load() == 0 && l.peers[i].ejectedUntil.Load() == 0 {
+				return false // this peer's measured latency never reached its EWMA
+			}
+		}
+		// The slow peer was sampled too — or was already ejected, which resets its
+		// counts (and proves the whole record->eject pipeline ran end to end).
+		return latEjected(l, 0) || l.peers[0].samples.Load() > 0
+	}, 3*time.Second, 10*time.Millisecond,
+		"every peer's measured latency reaches its EWMA under concurrency")
 	close(stop)
 	wg.Wait()
 }
