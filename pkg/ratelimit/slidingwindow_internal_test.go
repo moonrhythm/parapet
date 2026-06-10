@@ -234,7 +234,7 @@ func TestSlidingWindowSingleCleanupGoroutine(t *testing.T) {
 	base := runtime.NumGoroutine()
 	b := &SlidingWindowStrategy{Max: 1 << 30, Size: time.Hour}
 
-	b.Take("k") // first Take arms the (long-sleeping, never-exiting) cleanup loop
+	b.Take("k") // first Take arms the (long-sleeping; exits only when the map drains) cleanup loop
 	require.Eventually(t, func() bool { return runtime.NumGoroutine() >= base+1 }, time.Second, 5*time.Millisecond,
 		"the first Take starts the cleanup loop")
 	after := runtime.NumGoroutine()
@@ -243,4 +243,85 @@ func TestSlidingWindowSingleCleanupGoroutine(t *testing.T) {
 		b.Take("k")
 	}
 	assert.LessOrEqual(t, runtime.NumGoroutine(), after, "no additional goroutine per Take")
+}
+
+// TestSlidingWindowJanitorStopOnlyWhenEmpty pins the janitor's stop state machine:
+// a sweep that leaves live keys keeps it running; the sweep that empties the map
+// marks it stopped in the SAME critical section (so no Take can observe a non-empty
+// map with no janitor); the next Take arms it again.
+func TestSlidingWindowJanitorStopOnlyWhenEmpty(t *testing.T) {
+	t.Parallel()
+
+	b := &SlidingWindowStrategy{Max: 10, Size: time.Hour}
+
+	cur := time.Now().UnixNano() / b.size()
+	b.mu.Lock()
+	b.storage = map[string]*slidingItem{
+		"stale": {window: 0, curr: 1},   // epoch: many windows old
+		"fresh": {window: cur, curr: 1}, // current window: survives the sweep
+	}
+	b.cleanupRunning = true
+	b.mu.Unlock()
+
+	require.False(t, b.evictStale(), "a surviving key keeps the janitor running")
+	b.mu.RLock()
+	assert.True(t, b.cleanupRunning)
+	assert.Len(t, b.storage, 1)
+	b.mu.RUnlock()
+
+	// Age the survivor out; the emptying sweep stops the janitor.
+	b.mu.Lock()
+	b.storage["fresh"].window = 0
+	b.mu.Unlock()
+	require.True(t, b.evictStale(), "the sweep that empties the map reports stop")
+	b.mu.RLock()
+	assert.False(t, b.cleanupRunning, "stop is marked under the same lock as the sweep")
+	assert.Empty(t, b.storage)
+	b.mu.RUnlock()
+
+	// Idle -> active: the next Take restarts the janitor.
+	require.True(t, b.Take("k"))
+	b.mu.RLock()
+	assert.True(t, b.cleanupRunning, "the next Take restarts the janitor")
+	b.mu.RUnlock()
+}
+
+// TestSlidingWindowJanitorExitsWhenIdle drives the REAL cleanupLoop (via the sweep
+// cadence seam) end-to-end: traffic stops, the keys go stale within ~2 windows, the
+// emptying sweep makes the goroutine exit — the #243 leak — and the strategy is
+// armed again by the next Take.
+func TestSlidingWindowJanitorExitsWhenIdle(t *testing.T) {
+	// not parallel: NumGoroutine is process-global (same reasoning as
+	// TestSlidingWindowSingleCleanupGoroutine).
+	base := runtime.NumGoroutine()
+	b := &SlidingWindowStrategy{Max: 10, Size: 10 * time.Millisecond, sweepEvery: 5 * time.Millisecond}
+
+	require.True(t, b.Take("k"))
+	// Assert the invariant, not an instant: a live janitor — or, if this goroutine
+	// stalled past a sweep, an already-drained map (the janitor then stopped
+	// correctly). Requiring cleanupRunning alone would race the 5ms sweep.
+	b.mu.RLock()
+	armed := b.cleanupRunning || len(b.storage) == 0
+	b.mu.RUnlock()
+	require.True(t, armed, "first Take arms the janitor (or it already drained and stopped)")
+
+	// No further traffic: "k" is >= 2 windows old after ~20ms and the sweep that
+	// evicts it must mark the janitor stopped and exit the goroutine.
+	require.Eventually(t, func() bool {
+		b.mu.RLock()
+		defer b.mu.RUnlock()
+		return !b.cleanupRunning && len(b.storage) == 0
+	}, 2*time.Second, 2*time.Millisecond, "the janitor stops once the map drains")
+	// Plain polling, NOT require.Eventually: Eventually evaluates its condition in a
+	// goroutine of its own, which would inflate NumGoroutine by one forever.
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline) && runtime.NumGoroutine() > base; {
+		time.Sleep(2 * time.Millisecond)
+	}
+	assert.LessOrEqual(t, runtime.NumGoroutine(), base, "the janitor goroutine actually exited (not just flagged stopped)")
+
+	require.True(t, b.Take("k2"))
+	b.mu.RLock()
+	rearmed := b.cleanupRunning || len(b.storage) == 0 // invariant form, as above
+	b.mu.RUnlock()
+	require.True(t, rearmed, "the next Take restarts the janitor (or it already drained and stopped)")
 }
