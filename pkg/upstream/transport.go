@@ -26,21 +26,31 @@ const (
 //
 //nolint:govet
 type H2CTransport struct {
-	once   sync.Once
-	dialer *net.Dialer
-	h2     *http2.Transport
-	h1     *http.Transport
+	once sync.Once
+	h2   *http2.Transport
+	h1   *http.Transport
 
 	HTTP2Transport *http2.Transport
 	HTTPTransport  *http.Transport
+
+	// DialContext, if non-nil, replaces the default net.Dialer used to open
+	// TCP connections to the upstream. nil uses an internal net.Dialer with
+	// the default dial timeout and keep-alive (today's behavior, unchanged).
+	// Use it to observe dial errors, re-resolve endpoints, or wrap the
+	// connection. A custom dialer is responsible for honoring its own
+	// timeouts; the default dial timeout is ignored when DialContext is set.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // RoundTrip implement http.RoundTripper
 func (t *H2CTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	t.once.Do(func() {
-		t.dialer = &net.Dialer{
-			Timeout:   defaultDialTimeout,
-			KeepAlive: defaultIdleConnTimeout,
+		dial := t.DialContext
+		if dial == nil {
+			dial = (&net.Dialer{
+				Timeout:   defaultDialTimeout,
+				KeepAlive: defaultIdleConnTimeout,
+			}).DialContext
 		}
 
 		t.h2 = t.HTTP2Transport
@@ -51,14 +61,14 @@ func (t *H2CTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 		}
 		t.h2.AllowHTTP = true
 		t.h2.DialTLSContext = func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-			return t.dialer.DialContext(ctx, network, addr)
+			return dial(ctx, network, addr)
 		}
 
 		t.h1 = t.HTTPTransport
 		if t.h1 == nil {
 			t.h1 = &http.Transport{
 				Proxy:                 http.ProxyFromEnvironment,
-				DialContext:           t.dialer.DialContext,
+				DialContext:           dial,
 				DisableCompression:    true,
 				MaxIdleConns:          defaultMaxIdleConns,
 				MaxIdleConnsPerHost:   defaultMaxIdleConns,
@@ -93,6 +103,14 @@ type HTTPTransport struct {
 	IdleConnTimeout       time.Duration
 	ExpectContinueTimeout time.Duration
 	ResponseHeaderTimeout time.Duration
+
+	// DialContext, if non-nil, replaces the default net.Dialer used to open
+	// TCP connections to the upstream. nil uses an internal net.Dialer built
+	// from DialTimeout/TCPKeepAlive (today's behavior, unchanged). Use it to
+	// observe dial errors, re-resolve endpoints, or wrap the connection. A
+	// custom dialer is responsible for honoring its own timeouts; DialTimeout
+	// is ignored when DialContext is set.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // RoundTrip implement http.RoundTripper
@@ -111,12 +129,17 @@ func (t *HTTPTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			t.ResponseHeaderTimeout = defaultResponseHeaderTimeout
 		}
 
-		t.h = &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
+		dial := t.DialContext
+		if dial == nil {
+			dial = (&net.Dialer{
 				Timeout:   t.DialTimeout,
 				KeepAlive: t.TCPKeepAlive,
-			}).DialContext,
+			}).DialContext
+		}
+
+		t.h = &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dial,
 			DisableKeepAlives:     t.DisableKeepAlives,
 			MaxConnsPerHost:       t.MaxConn,
 			MaxIdleConnsPerHost:   t.MaxIdleConns,
@@ -147,6 +170,15 @@ type HTTPSTransport struct {
 	ExpectContinueTimeout time.Duration
 	ResponseHeaderTimeout time.Duration
 	TLSClientConfig       *tls.Config
+
+	// DialContext, if non-nil, replaces the default net.Dialer used to open
+	// TCP connections to the upstream (the TLS handshake is then performed on
+	// top of that connection). nil uses an internal net.Dialer built from
+	// DialTimeout/TCPKeepAlive (today's behavior, unchanged). Use it to
+	// observe dial errors, re-resolve endpoints, or wrap the connection. A
+	// custom dialer is responsible for honoring its own timeouts; DialTimeout
+	// is ignored when DialContext is set.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // RoundTrip implement http.RoundTripper
@@ -170,12 +202,17 @@ func (t *HTTPSTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 			}
 		}
 
-		t.h = &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			DialContext: (&net.Dialer{
+		dial := t.DialContext
+		if dial == nil {
+			dial = (&net.Dialer{
 				Timeout:   t.DialTimeout,
 				KeepAlive: t.TCPKeepAlive,
-			}).DialContext,
+			}).DialContext
+		}
+
+		t.h = &http.Transport{
+			Proxy:                 http.ProxyFromEnvironment,
+			DialContext:           dial,
 			TLSClientConfig:       t.TLSClientConfig,
 			DisableKeepAlives:     t.DisableKeepAlives,
 			MaxConnsPerHost:       t.MaxConn,
@@ -258,6 +295,15 @@ type Transport struct {
 	ResponseHeaderTimeout time.Duration
 	DisableCompression    bool
 	TLSClientConfig       *tls.Config
+
+	// DialContext, if non-nil, replaces the default net.Dialer used to open
+	// TCP connections to the upstream for the http and h2c (plaintext) paths.
+	// nil uses an internal net.Dialer built from DialTimeout/TCPKeepAlive
+	// (today's behavior, unchanged). Use it to observe dial errors, re-resolve
+	// endpoints, or wrap the connection. A custom dialer is responsible for
+	// honoring its own timeouts; DialTimeout is ignored when DialContext is
+	// set. The unix-socket path is unaffected.
+	DialContext func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // RoundTrip implement http.RoundTripper
@@ -286,9 +332,14 @@ func (t *Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 			KeepAlive: t.TCPKeepAlive,
 		}
 
+		dial := t.DialContext
+		if dial == nil {
+			dial = t.dialer.DialContext
+		}
+
 		t.httpTr = &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
-			DialContext:           t.dialer.DialContext,
+			DialContext:           dial,
 			TLSClientConfig:       t.TLSClientConfig,
 			DisableKeepAlives:     t.DisableKeepAlives,
 			MaxConnsPerHost:       t.MaxConn,
@@ -302,7 +353,7 @@ func (t *Transport) RoundTrip(r *http.Request) (*http.Response, error) {
 			AllowHTTP:          true,
 			DisableCompression: t.DisableCompression,
 			DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-				return t.dialer.DialContext(ctx, network, addr)
+				return dial(ctx, network, addr)
 			},
 		}
 		t.unixTr = &http.Transport{
