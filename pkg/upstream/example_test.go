@@ -199,6 +199,55 @@ func ExampleUpstream_onRoundTrip() {
 	s.Use(m)
 }
 
+// Compose a production reliability stack: ACTIVE health probing wrapping a CIRCUIT
+// BREAKER over the pool. The breaker fails fast (an open target costs no round-trip)
+// and sheds 503 when every target is open; active health probes out-of-band and only
+// REMOVES probe-down targets from the breaker's pick — the two gate together by AND.
+// Pass the SAME []*Target to both so their indices line up, and wire each layer's
+// OnStateChange to prom.UpstreamState() so trips, recoveries, and probe-downs are
+// observable. See pkg/upstream's package doc for the failure-mode / all-down-
+// semantics guide this example illustrates.
+func ExampleNewActiveHealthCheck_compose() {
+	tr := &upstream.HTTPTransport{}
+	targets := []*upstream.Target{
+		{Host: "10.0.0.1:8080", Transport: tr},
+		{Host: "10.0.0.2:8080", Transport: tr},
+		{Host: "10.0.0.3:8080", Transport: tr},
+	}
+
+	// Inner: a circuit breaker that fails fast and sheds 503 on a correlated outage.
+	cb := upstream.NewCircuitBreakingLoadBalancer(targets)
+	cb.FailureThreshold = 5
+	cb.OpenTimeout = 5 * time.Second
+	cb.IsFailure = func(resp *http.Response, err error) bool {
+		return err != nil || (resp != nil && resp.StatusCode >= 500)
+	}
+	cb.OnStateChange = func(c upstream.StateChange) {
+		_ = c.From // wire to prom.UpstreamState() in production
+		_ = c.To
+		_ = c.Reason // ReasonTrip / ReasonHeal / ReasonProbe / ...
+	}
+
+	// Outer: active probing that gates the breaker's pick (only removes candidates).
+	ahc := upstream.NewActiveHealthCheck(targets, cb)
+	ahc.Path = "/healthz"
+	ahc.Interval = 5 * time.Second
+	ahc.UnhealthyThld = 3
+	ahc.OnStateChange = func(c upstream.StateChange) {
+		_ = c.Reason // ReasonProbeDown / ReasonProbeRecover
+		_ = c.Cause  // classified failure cause on a probe-down (e.g. "timeout")
+	}
+
+	u := upstream.New(ahc) // ahc is the proxy's transport, like any balancer
+	u.OnRoundTrip = func(r *http.Request, info upstream.RoundTripInfo) {
+		_ = info.Host   // resolved target; "" when shed before any pick
+		_ = info.Status // wire to prom.Upstream() in production
+	}
+
+	s := parapet.New()
+	s.Use(u)
+}
+
 // Pick the transport for the backend's protocol. Transport auto-selects per the
 // request URL scheme (http/https, h2c for cleartext HTTP/2, unix sockets), so one
 // instance can front a mixed pool; the dedicated transports pin a single protocol.
