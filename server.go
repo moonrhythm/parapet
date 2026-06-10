@@ -20,10 +20,18 @@ import (
 //
 //nolint:govet
 type Server struct {
-	s          http.Server
-	once       sync.Once
-	ms         Middlewares
-	onShutdown []func()
+	s    http.Server
+	once sync.Once
+	ms   Middlewares
+
+	// muShutdown guards onShutdown and shuttingDown. Both are cold-path:
+	// registration (RegisterOnShutdown, possibly from request goroutines via
+	// lazy once.Do in pkg/healthz and pkg/upstream) and the one-shot shutdown
+	// snapshot. It is never taken on the per-request hot path.
+	muShutdown   sync.Mutex
+	onShutdown   []func()
+	shuttingDown bool
+
 	modifyConn []func(conn net.Conn) net.Conn
 
 	Addr               string
@@ -201,12 +209,26 @@ func (s *Server) Serve(l net.Listener) error {
 
 // Shutdown gracefully shutdowns server
 func (s *Server) Shutdown() error {
-	for _, f := range s.onShutdown {
-		go f()
-	}
+	// Flip the shutting-down flag and take the callback snapshot in one
+	// critical section, then release before firing/sleeping/draining so the
+	// lock is never held across time.Sleep, go f(), or s.s.Shutdown. After
+	// this point RegisterOnShutdown sees shuttingDown==true and runs f itself,
+	// so no registration can be lost between the snapshot and the flag flip.
+	s.muShutdown.Lock()
+	first := !s.shuttingDown
+	s.shuttingDown = true
+	fns := s.onShutdown
+	s.onShutdown = nil
+	s.muShutdown.Unlock()
 
-	// wait for service to de-registered
-	time.Sleep(s.WaitBeforeShutdown)
+	if first {
+		for _, f := range fns {
+			go f()
+		}
+
+		// wait for service to de-registered
+		time.Sleep(s.WaitBeforeShutdown)
+	}
 
 	ctx := context.Background()
 	if s.GraceTimeout > 0 {
@@ -218,12 +240,44 @@ func (s *Server) Shutdown() error {
 	return s.s.Shutdown(ctx)
 }
 
-// RegisterOnShutdown calls f when server received SIGTERM
+// RegisterOnShutdown registers f to run when the server begins graceful
+// shutdown (Shutdown, e.g. on SIGTERM). It is safe to call concurrently,
+// including from request handlers while the server is already shutting down.
+//
+// Ordering relative to Shutdown:
+//   - Registered before Shutdown begins: f is launched by Shutdown via go f().
+//   - Registered after Shutdown has begun (concurrently or later): f is
+//     launched immediately by this call via go f(), instead of being queued —
+//     so a registration that loses the race to Shutdown is never dropped.
+//
+// In both cases f runs on its own goroutine, exactly once: the first Shutdown
+// fires its snapshot and clears it, so a later Shutdown re-fires nothing, and a
+// registration that loses the race to Shutdown takes the run-now path rather
+// than being dropped. RegisterOnShutdown does not wait for f to complete. f
+// must still be safe to run at any time, because the run-now launch can happen
+// on an arbitrary request goroutine concurrently with the shutdown sequence.
+// In-tree callers satisfy this: pkg/healthz does an atomic flag store, and
+// pkg/upstream ActiveHealthCheck.Close is idempotent.
 func (s *Server) RegisterOnShutdown(f func()) {
+	s.muShutdown.Lock()
+	if s.shuttingDown {
+		s.muShutdown.Unlock()
+		go f()
+		return
+	}
 	s.onShutdown = append(s.onShutdown, f)
+	s.muShutdown.Unlock()
 }
 
-// ModifyConnection modifies connection before send to http
+// ModifyConnection registers f to wrap every accepted connection before it is
+// handed to the HTTP server (e.g. PROXY-protocol unwrapping, byte accounting).
+//
+// It must be called before serving begins, from the same goroutine that sets
+// the server up: listenAndServe reads the registered set once and hands it to
+// the listener, which then owns it for its lifetime. Unlike RegisterOnShutdown
+// it is NOT safe to call concurrently with, or after, serving — all in-tree
+// callers (pkg/prom.Networks, pkg/proxyprotocol) follow this. A late call would
+// not affect already-accepted listeners and could race the accept loop.
 func (s *Server) ModifyConnection(f func(conn net.Conn) net.Conn) {
 	s.modifyConn = append(s.modifyConn, f)
 }
