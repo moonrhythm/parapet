@@ -131,7 +131,7 @@ func ExampleNewLatencyEjectingLoadBalancer() {
 		{Host: "10.0.0.2:8080", Transport: tr},
 		{Host: "10.0.0.3:8080", Transport: tr},
 	})
-	lb.EjectionFactor = 3      // eject a target 3x slower than the pool median
+	lb.EjectionFactor = 3 // eject a target 3x slower than the pool median
 	lb.HalfLife = 10 * time.Second
 
 	s := parapet.New()
@@ -172,6 +172,12 @@ func ExampleNewActiveHealthCheck() {
 	ahc.Path = "/healthz"
 	ahc.Interval = 5 * time.Second
 	ahc.UnhealthyThld = 3 // down after 3 consecutive failed probes
+	// Observe gate flips (probe-down with a classified cause / probe-recover); wire to
+	// prom.UpstreamState in production for upstream_probe_down_total{host,cause}.
+	ahc.OnStateChange = func(c upstream.StateChange) {
+		_ = c.Reason // ReasonProbeDown or ReasonProbeRecover
+		_ = c.Cause  // classified failure cause on a down event, e.g. "timeout"
+	}
 
 	s := parapet.New()
 	s.Use(upstream.New(ahc)) // ahc is the proxy's transport, like any balancer

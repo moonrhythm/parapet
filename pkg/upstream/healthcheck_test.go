@@ -112,13 +112,13 @@ func TestActiveHealthCheck_FlapResetsOppositeCounter(t *testing.T) {
 	pt := &probeTarget{up: &up}
 
 	for _, ok := range []bool{true, false, true, false, true, false, true} {
-		a.observe(pt, ok) // strictly alternating: neither run ever reaches its threshold
+		a.observe(pt, ok, CauseNone) // strictly alternating: neither run ever reaches its threshold
 	}
 	assert.True(t, up.Load(), "an alternating ok/fail sequence never crosses a threshold")
 
-	a.observe(pt, false)
-	a.observe(pt, false)
-	a.observe(pt, false) // three consecutive failures now
+	a.observe(pt, false, CauseError)
+	a.observe(pt, false, CauseError)
+	a.observe(pt, false, CauseError) // three consecutive failures now
 	assert.False(t, up.Load(), "UnhealthyThld consecutive failures mark it down")
 }
 

@@ -62,6 +62,69 @@ func TestUpstreamFastRejects(t *testing.T) {
 		"only ErrUnavailable (shed-before-round-trip) counts")
 }
 
+// countDelta treats counterValue's -1 (absent series) as 0 so the positive-count
+// assertions are safe to run repeatedly (-count) against the process-global registry.
+func countDelta(before, after float64) float64 {
+	if before < 0 {
+		before = 0
+	}
+	return after - before
+}
+
+func TestUpstreamState_ProbeDownCause(t *testing.T) {
+	observe := UpstreamState()
+	const host = "prom-probedown-test.backend"
+	downLbl := map[string]string{"host": host, "cause": "timeout"}
+	transLbl := map[string]string{"host": host, "from": "closed", "to": "open", "reason": "probe_down"}
+	baseDown := counterValue(t, "parapet_upstream_probe_down_total", downLbl)
+	baseTrans := counterValue(t, "parapet_upstream_state_transitions_total", transLbl)
+
+	observe(upstream.StateChange{
+		Host: host, From: upstream.StateClosed, To: upstream.StateOpen,
+		Reason: upstream.ReasonProbeDown, Cause: upstream.CauseTimeout,
+	})
+
+	// The cause rides on the focused probe-down counter...
+	assert.EqualValues(t, 1, countDelta(baseDown, counterValue(t, "parapet_upstream_probe_down_total", downLbl)))
+	// ...and the transition still flows into the UNCHANGED authoritative counter.
+	assert.EqualValues(t, 1, countDelta(baseTrans, counterValue(t, "parapet_upstream_state_transitions_total", transLbl)))
+	assert.EqualValues(t, 1, gaugeValue(t, "parapet_upstream_breaker_state", map[string]string{"host": host}),
+		"gauge reflects To=open (1)")
+}
+
+func TestUpstreamState_RecoverNoProbeDownSeries(t *testing.T) {
+	observe := UpstreamState()
+	const host = "prom-proberecover-test.backend"
+	transLbl := map[string]string{"host": host, "from": "open", "to": "closed", "reason": "probe_recover"}
+	baseTrans := counterValue(t, "parapet_upstream_state_transitions_total", transLbl)
+
+	observe(upstream.StateChange{
+		Host: host, From: upstream.StateOpen, To: upstream.StateClosed,
+		Reason: upstream.ReasonProbeRecover, // Cause defaults to CauseNone
+	})
+
+	assert.EqualValues(t, 1, countDelta(baseTrans, counterValue(t, "parapet_upstream_state_transitions_total", transLbl)))
+	assert.EqualValues(t, -1, counterValue(t, "parapet_upstream_probe_down_total", map[string]string{"host": host}),
+		"a recover (CauseNone) creates no probe_down series")
+	assert.EqualValues(t, 0, gaugeValue(t, "parapet_upstream_breaker_state", map[string]string{"host": host}),
+		"gauge reflects To=closed (0)")
+}
+
+func TestUpstreamState_EjectDoesNotTouchProbeDown(t *testing.T) {
+	observe := UpstreamState()
+	const host = "prom-eject-noprobe-test.backend"
+	transLbl := map[string]string{"host": host, "from": "closed", "to": "open", "reason": "eject"}
+	baseTrans := counterValue(t, "parapet_upstream_state_transitions_total", transLbl)
+
+	observe(upstream.StateChange{
+		Host: host, From: upstream.StateClosed, To: upstream.StateOpen, Reason: upstream.ReasonEject,
+	})
+
+	assert.EqualValues(t, 1, countDelta(baseTrans, counterValue(t, "parapet_upstream_state_transitions_total", transLbl)))
+	assert.EqualValues(t, -1, counterValue(t, "parapet_upstream_probe_down_total", map[string]string{"host": host}),
+		"a non-probe emitter never populates the probe_down counter")
+}
+
 // Make circuit-breaker / ejection state observable: count transitions and track
 // the current state per backend.
 func ExampleUpstreamState() {

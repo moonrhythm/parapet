@@ -21,16 +21,35 @@ func TestStateString(t *testing.T) {
 func TestReasonString(t *testing.T) {
 	t.Parallel()
 	for r, s := range map[Reason]string{
-		ReasonTrip:    "trip",
-		ReasonReopen:  "reopen",
-		ReasonHeal:    "heal",
-		ReasonProbe:   "probe",
-		ReasonExpire:  "expire",
-		ReasonEject:   "eject",
-		ReasonRecover: "recover",
+		ReasonTrip:         "trip",
+		ReasonReopen:       "reopen",
+		ReasonHeal:         "heal",
+		ReasonProbe:        "probe",
+		ReasonExpire:       "expire",
+		ReasonEject:        "eject",
+		ReasonRecover:      "recover",
+		ReasonProbeDown:    "probe_down",
+		ReasonProbeRecover: "probe_recover",
 	} {
 		assert.Equal(t, s, r.String())
 	}
+}
+
+func TestProbeCauseString(t *testing.T) {
+	t.Parallel()
+	for c, s := range map[ProbeCause]string{
+		CauseNone:    "none",
+		CauseTimeout: "timeout",
+		CauseRefused: "refused",
+		CauseReset:   "reset",
+		CauseDNS:     "dns",
+		CauseTLS:     "tls",
+		CauseStatus:  "status",
+		CauseError:   "error",
+	} {
+		assert.Equal(t, s, c.String())
+	}
+	assert.Equal(t, "none", ProbeCause(200).String(), "an out-of-range value collapses to none, never an unbounded label")
 }
 
 // stateRecorder captures StateChange events for assertions.
