@@ -61,9 +61,12 @@ func TestConcurrentQueueStrategy(t *testing.T) {
 		// A 3rd Take queues and blocks until a slot frees.
 		q := make(chan bool, 1)
 		go func() { q <- s.Take("") }()
-		// Let the queued goroutine reach the block (increment QueueCount to 1). There
-		// is no external signal for "now blocked"; a generous wait covers CI load.
-		time.Sleep(100 * time.Millisecond)
+		// Wait until the queued goroutine has actually reached the block (QueueCount
+		// is 1) instead of sleeping: with a fixed sleep, a goroutine stalled past it
+		// would let the drop-Take below grab the queue slot itself and deadlock on the
+		// full Process channel.
+		require.Eventually(t, func() bool { return s.QueueCountForTest("") == 1 },
+			2*time.Second, time.Millisecond, "the queued Take never reached the block")
 
 		require.False(t, s.Take(""), "queue full (Size=1) -> drop")
 		require.False(t, s.Take(""), "still dropping")
@@ -73,9 +76,12 @@ func TestConcurrentQueueStrategy(t *testing.T) {
 		s.Put("") // free a slot -> unblock the queued Take
 		require.True(t, recvBool(t, q), "the queued Take acquired the freed slot")
 
-		// Repeat: another queued Take, again released by a Put.
+		// Repeat: another queued Take, again released by a Put. Same synchronization:
+		// QueueCount returned to 0 after the first cycle, so 1 means this Take queued
+		// (guaranteeing the second cycle really exercises the queued path).
 		go func() { q <- s.Take("") }()
-		time.Sleep(100 * time.Millisecond)
+		require.Eventually(t, func() bool { return s.QueueCountForTest("") == 1 },
+			2*time.Second, time.Millisecond, "the second queued Take never reached the block")
 		require.True(t, s.Take("other"), "a different key is still independent")
 		s.Put("")
 		require.True(t, recvBool(t, q), "the second queued Take acquired its slot")

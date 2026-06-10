@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"errors"
+	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -150,14 +151,26 @@ func TestEjectingLoadBalancer_StateChangeConcurrentOneEject(t *testing.T) {
 func TestLatencyEjectingLoadBalancer_StateChange(t *testing.T) {
 	t.Parallel()
 	var rec stateRecorder
-	slow := &fakeUpstream{}
-	slow.delay.Store(int64(latSlow))
-	l := latTestLB(newEjectTargets(slow, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
+	l := latTestLB(newEjectTargets(&fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}, &fakeUpstream{}))
 	l.OnStateChange = rec.fn()
-	driveLB(l, 300)
-	assert.GreaterOrEqual(t, rec.count(ReasonEject), 1, "the slow target's ejection emits ReasonEject")
+	l.once.Do(l.init)
+	// Synthetic constant durations through record(): timing real round-trips lets
+	// scheduler stalls inflate the fast peers' EWMA seeds (lifting the median so the
+	// 5ms outlier never ejects and the count stays 0). Constant samples pin each EWMA,
+	// so the whole record -> poolMedian -> guard-rails -> eject -> OnStateChange path
+	// runs deterministically. Fast peers first each round so the slow peer's
+	// MinSamples-th record sees a valid >=MinHosts baseline and ejects exactly once.
+	resp := httptest.NewRecorder().Result()
+	for range int(l.MinSamples) {
+		for p := 1; p < 4; p++ {
+			l.record(&l.peers[p], 100*time.Microsecond, resp, nil)
+		}
+		l.record(&l.peers[0], latSlow, resp, nil)
+	}
+	assert.Equal(t, 1, rec.count(ReasonEject), "the slow target's ejection emits ReasonEject")
 	for _, c := range rec.all() {
 		if c.Reason == ReasonEject {
+			assert.Equal(t, StateClosed, c.From, "first ejection comes from closed")
 			assert.Equal(t, StateOpen, c.To)
 		}
 	}

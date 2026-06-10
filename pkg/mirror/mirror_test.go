@@ -227,15 +227,22 @@ func TestSlowMirrorNeverBlocksPrimary(t *testing.T) {
 	rc := newRecorder()
 	rc.gate = make(chan struct{}) // workers block until released at the end
 	defer close(rc.gate)
-	m := newMirror(rc) // Workers=4, QueueSize=16
+	m := newMirror(rc)                  // Workers=4, QueueSize=16
+	m.Timeout = 200 * time.Millisecond // gated workers free fast if a regression blocks dispatch
 
 	const n = 200
+	loopStart := time.Now()
 	for range n {
-		start := time.Now()
 		serve(m, func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) },
 			httptest.NewRequest("GET", "/", nil))
-		assert.Less(t, time.Since(start), 200*time.Millisecond, "the primary never waits on the mirror")
 	}
+	// Watchdog only: a per-iteration wall-clock bound gives a CI stall 200 chances to
+	// fail a non-blocking path, so we bound the WHOLE loop instead. With all 4 workers
+	// gated and the 16-slot queue full, a blocking dispatch would stall in 200ms
+	// ctx-Timeout waves of 4 (the gated canary honors ctx.Done) — ~9s for 180 blocked
+	// sends, comfortably past this bound — so 200 serves finishing inside it proves
+	// the primary never waits; dropFull>0 below proves the drop path was exercised.
+	assert.Less(t, time.Since(loopStart), 5*time.Second, "the primary never waits on the mirror")
 
 	// Most are dropped (queue full); the pool never grows unbounded (Workers, not n).
 	_, dropFull, _, _, _ := m.Stats()
@@ -271,12 +278,12 @@ func TestHungMirrorRespectsTimeout(t *testing.T) {
 	m := newMirror(rc)
 	m.Timeout = 50 * time.Millisecond
 
-	start := time.Now()
 	serve(m, func(http.ResponseWriter, *http.Request) {}, httptest.NewRequest("GET", "/", nil))
 
+	// The bounded Eventually alone proves "the timeout frees the worker"; a separate
+	// wall-clock cap raced worker scheduling against an inconsistent (smaller) budget.
 	require.Eventually(t, func() bool { return rc.ctxCanceled.Load() }, 2*time.Second, 5*time.Millisecond,
-		"the detached Timeout fires and frees the worker")
-	assert.Less(t, time.Since(start), time.Second, "no permanent worker pin")
+		"the detached Timeout fires and frees the worker (no permanent worker pin)")
 }
 
 func TestHopByHopStrippedMarkedAndReframed(t *testing.T) {
@@ -338,10 +345,11 @@ func TestRequestURIClearedAndIntegration(t *testing.T) {
 	// exercised end to end against a real transport (not just the clone).
 	want := bytes.Repeat([]byte("z"), 3000)
 	var (
-		gotMirror  atomic.Bool
-		gotBody    atomic.Bool
-		gotLen     atomic.Int64
-		gotChunked atomic.Bool
+		gotMirror   atomic.Bool
+		gotBody     atomic.Bool
+		gotLen      atomic.Int64
+		gotChunked  atomic.Bool
+		handlerDone atomic.Bool // set LAST: the completion signal the test gates on
 	)
 	canary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("X-Mirror") == "1" {
@@ -352,6 +360,7 @@ func TestRequestURIClearedAndIntegration(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		gotBody.Store(bytes.Equal(b, want))
 		w.WriteHeader(http.StatusOK)
+		handlerDone.Store(true)
 	}))
 	defer canary.Close()
 
@@ -366,8 +375,12 @@ func TestRequestURIClearedAndIntegration(t *testing.T) {
 	r.ContentLength = -1
 	serve(m, func(w http.ResponseWriter, r *http.Request) { _, _ = io.ReadAll(r.Body); w.WriteHeader(http.StatusOK) }, r)
 
-	require.Eventually(t, gotMirror.Load, 2*time.Second, 10*time.Millisecond,
+	// Gate on handler COMPLETION, not its first side effect: gating on gotMirror alone
+	// let the asserts below read gotBody/gotLen/gotChunked before the canary handler
+	// had stored them.
+	require.Eventually(t, handlerDone.Load, 2*time.Second, 10*time.Millisecond,
 		"the mirrored request reached a real reverse-proxy destination (RequestURI cleared, no panic)")
+	assert.True(t, gotMirror.Load(), "the mirrored request carried the mark to the canary")
 	assert.True(t, gotBody.Load(), "the canary received the byte-identical body")
 	assert.EqualValues(t, len(want), gotLen.Load(), "fixed Content-Length, not chunked-reframed")
 	assert.False(t, gotChunked.Load(), "TransferEncoding=nil prevented chunked re-framing")

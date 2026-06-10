@@ -380,11 +380,20 @@ func TestCircuitBreaker_OpenCooldownRateLimitsProbes(t *testing.T) {
 	l := &CircuitBreakingLoadBalancer{
 		Targets: newEjectTargets(t0), FailureThreshold: 1, OpenTimeout: 20 * time.Millisecond, MaxOpenTimeout: 20 * time.Millisecond, HalfOpenMaxProbes: 1,
 	}
+	// Bound the probe count by the MEASURED wall-clock window, not the goroutine
+	// count: the budget is ~one probe per OpenTimeout for as long as the hammer
+	// actually runs, and time.Sleep(200ms) can oversleep arbitrarily on a saturated
+	// runner — a fixed bound of 40 fails once the window stretches past ~780ms even
+	// though the cooldown gating worked. Measuring from the trip (where the first
+	// cooldown starts) makes the bound exact at any execution speed, while a
+	// zero-cooldown stale-timer flood still exceeds it by orders of magnitude.
+	start := time.Now()
 	driveLB(l, 1) // trip
 	hammer(l, 40, 200*time.Millisecond)
+	elapsed := time.Since(start)
 
 	total := t0.calls.Load()
-	assert.Less(t, total, int64(40), "cooldown rate-limits probes; no stale-timer flood")
+	assert.Less(t, total, int64(elapsed/l.OpenTimeout)+5, "cooldown rate-limits probes; no stale-timer flood")
 	assert.Greater(t, total, int64(1), "probes are admitted after each cooldown")
 }
 

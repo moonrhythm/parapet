@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/moonrhythm/parapet"
 	"github.com/moonrhythm/parapet/pkg/logger"
@@ -304,19 +306,25 @@ func TestIssue115(t *testing.T) {
 	}))
 	defer upstreamServer.Close()
 
-	frontendServer := parapet.Server{
-		Addr: "127.0.0.1:3002",
-	}
+	// Bind the listener in the test on an OS-assigned port: net.Listen returning means
+	// the kernel already accepts into the backlog (before Serve even runs), which
+	// designs out both the sleep-vs-listener-goroutine startup race and the fixed-port
+	// (3002) collision — the old 1s sleep was the only readiness signal, and a stalled
+	// listener goroutine made the unchecked http.Get nil-pointer panic.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	frontendServer := parapet.Server{}
 	frontendServer.Use(&Upstream{
 		Transport: SingleHost(strings.TrimPrefix(upstreamServer.URL, "http://"), &HTTPTransport{}),
 	})
-	go frontendServer.ListenAndServe()
+	go frontendServer.Serve(ln)
 	defer frontendServer.Shutdown()
 
-	time.Sleep(time.Second)
-
-	resp, _ := http.Get("http://127.0.0.1:3002")
+	resp, err := http.Get("http://" + ln.Addr().String())
+	require.NoError(t, err)
+	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
 	assert.Equal(t, "ok", string(body))
 }

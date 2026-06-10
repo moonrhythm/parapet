@@ -143,13 +143,24 @@ func TestSlidingWindowEvictStale(t *testing.T) {
 	require.True(t, b.Take("stale"))
 	require.True(t, b.Take("fresh"))
 
-	cur := time.Now().UnixNano() / b.size()
-	b.mu.Lock()
-	b.storage["stale"].window = 0       // epoch: many windows old
-	b.storage["fresh"].window = cur - 1 // exactly one window old: still has a live prev
-	b.mu.Unlock()
+	// evictStale re-reads the clock internally; if the top of the hour fell between
+	// computing cur and that read, deleteBefore would advance to cur and wrongly evict
+	// "fresh" (window cur-1). Bracket the call with epoch reads and re-stage on a
+	// crossing — a retry starts just past the boundary, so it cannot cross again.
+	for attempt := 0; ; attempt++ {
+		cur := time.Now().UnixNano() / b.size()
+		b.mu.Lock()
+		b.storage["stale"] = &slidingItem{window: 0, curr: 1}       // epoch: many windows old
+		b.storage["fresh"] = &slidingItem{window: cur - 1, curr: 1} // exactly one window old: still has a live prev
+		b.mu.Unlock()
 
-	b.evictStale()
+		b.evictStale()
+
+		if time.Now().UnixNano()/b.size() == cur {
+			break
+		}
+		require.Less(t, attempt, 3, "the hour boundary kept crossing the evictStale bracket")
+	}
 
 	b.mu.RLock()
 	_, staleExists := b.storage["stale"]
@@ -157,6 +168,60 @@ func TestSlidingWindowEvictStale(t *testing.T) {
 	b.mu.RUnlock()
 	assert.False(t, staleExists, ">= 2 windows old is evicted")
 	assert.True(t, freshExists, "one window old survives (its prev is still live)")
+}
+
+// TestSlidingWindowSuppressesBoundaryBurst proves, through the public Take and the
+// REAL d==1 roll inside it, that the previous window's spent budget suppresses the
+// up-to-2x burst a fixed window admits at its boundary. The rolled state is seeded
+// directly (a window that already spent Max, one roll away) instead of sleeping a
+// real 100ms window across a boundary, which raced the wall clock: with
+// Size=time.Hour, the admit condition Max*(1-e)+curr+1 <= Max caps curr at
+// Max*e-1 < Max-1 for any elapsed fraction e<1, hence burst < Max no matter where in
+// the hour the test runs. The exact smoothing math stays pinned by the deterministic
+// tests above.
+func TestSlidingWindowSuppressesBoundaryBurst(t *testing.T) {
+	t.Parallel()
+
+	const max = 10
+	b := &SlidingWindowStrategy{Max: max, Size: time.Hour}
+
+	for attempt := 0; ; attempt++ {
+		cur := time.Now().UnixNano() / b.size()
+		b.mu.Lock()
+		if b.storage == nil {
+			b.storage = make(map[string]*slidingItem)
+		}
+		// The previous window spent exactly Max; the first Take below performs the
+		// genuine curr->prev shift on roll's d==1 path.
+		b.storage["k"] = &slidingItem{window: cur - 1, curr: max}
+		b.mu.Unlock()
+
+		burst := 0
+		for range 100 {
+			if b.Take("k") {
+				burst++
+			}
+		}
+
+		// Retry only if the top of the hour fell inside the hammer loop (roll would
+		// then see d>=2, clear both counters, and spuriously grant a fresh Max). A
+		// retry starts just past the boundary, so it cannot cross again.
+		if time.Now().UnixNano()/b.size() == cur {
+			assert.Less(t, burst, max, "the previous window suppresses the boundary burst (no 2x)")
+			// And the d==1 roll genuinely executed inside Take: the seeded curr=Max
+			// moved to prev and the item advanced to the current window. A frozen or
+			// mis-wired window computation in Take would leave window==cur-1 (and
+			// could pass the burst assert above by never granting at all).
+			b.mu.RLock()
+			it := b.storage["k"]
+			b.mu.RUnlock()
+			require.NotNil(t, it)
+			assert.EqualValues(t, cur, it.window, "Take's clock read advanced the item to the current window")
+			assert.EqualValues(t, max, it.prev, "the spent budget shifted curr->prev on the d==1 roll")
+			break
+		}
+		require.Less(t, attempt, 3, "the hour boundary kept crossing the burst loop")
+	}
 }
 
 // TestSlidingWindowSingleCleanupGoroutine: the cleanup loop is started exactly once,
