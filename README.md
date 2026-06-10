@@ -19,6 +19,7 @@ Requires Go 1.25 or later.
 - **`Middleware`** — anything that satisfies `ServeHandler(http.Handler) http.Handler`. Every feature in this library is a `Middleware`.
 - **`Middlewares`** — an ordered slice of `Middleware`, applied in reverse order so the first `Use` call sits outermost (like an onion).
 - **`Server`** — wraps `http.Server` with a middleware chain and adds TLS, H2C, graceful shutdown (30 s grace, 10 s wait), and reuseport.
+- **Composition helpers** — `Cond{If, Then, Else}` branches inline without a `block`; `Handler` adapts an `http.HandlerFunc` into a terminal middleware; `MiddlewareFunc` and `Server.UseFunc` let a plain `func(http.Handler) http.Handler` be used directly.
 
 Three constructors pick sensible defaults for the role the server plays:
 
@@ -34,33 +35,34 @@ Each subdirectory under `pkg/` is a self-contained middleware:
 
 | Package | What it does |
 |---|---|
-| [`upstream`](pkg/upstream) | Reverse proxy and load balancing (round-robin, or round-robin with passive health checks) over HTTP, H2C, or HTTPS |
-| [`host`](pkg/host) | Virtual-host routing on the `Host` header, with wildcard prefixes |
-| [`location`](pkg/location) | Path routing — exact, prefix, and regexp matchers |
-| [`router`](pkg/router) | Simple URL router |
-| [`block`](pkg/block) | Conditional middleware container — match a request, then apply an inner chain |
+| [`upstream`](pkg/upstream) | Reverse proxy and load balancing (round-robin, weighted, least-conn, ejecting, circuit-breaking, latency-ejecting, hedging) with active or passive health checks, automatic retries, over HTTP, H2C, HTTPS, or a Unix socket |
+| [`host`](pkg/host) | Virtual-host routing on the `Host` header — wildcard prefixes, a `*` catch-all, and CIDR matching (`NewCIDR`), plus `StripPort`/`ToLower` normalizers |
+| [`location`](pkg/location) | Path routing — exact, segment-boundary prefix, and regexp matchers |
+| [`router`](pkg/router) | Simple URL router — subtree dispatch, falls through to the chain when no pattern matches |
+| [`block`](pkg/block) | Conditional middleware container — match a request, then apply an inner chain (a nil matcher makes it an unconditional catch-all) |
 | [`mirror`](pkg/mirror) | Traffic shadowing — tee a copy of matched/sampled requests to a canary, fire-and-forget |
-| [`ratelimit`](pkg/ratelimit) | Fixed-window (in-memory or Redis-backed for a global limit), sliding-window, concurrent, and leaky-bucket limiters |
-| [`compress`](pkg/compress) | Content-negotiated compression (Gzip, Brotli, Deflate) |
+| [`ratelimit`](pkg/ratelimit) | Fixed-window (in-memory or Redis-backed for a global limit), sliding-window, concurrent (drop-on-full or bounded-queue), and leaky-bucket limiters, with an `Observe` hook |
+| [`compress`](pkg/compress) | Content-negotiated compression (Gzip, Brotli, Deflate, Zstd; Brotli needs the `cbrotli` build tag) |
 | [`cache`](pkg/cache) | HTTP response cache — honor-origin policy, in-memory or disk backend, single-flight fills, `X-Cache` tag |
 | [`cache/purge`](pkg/cache/purge) | Cache invalidation — purge by host, URL, path prefix, or surrogate tag, plus a reaper |
-| [`body`](pkg/body) | Request body limiting and buffering |
+| [`body`](pkg/body) | Request body limiting (custom over-limit handler; default `413`) and buffering (small bodies in memory, large ones spilled to a temp file with a known `Content-Length`) |
 | [`headers`](pkg/headers) | Request/response header manipulation |
-| [`cors`](pkg/cors) | CORS handling |
+| [`cors`](pkg/cors) | CORS handling — allow-list via `AllowOriginFunc` (or `AllowOrigins(...)`); a disallowed `Origin` is rejected with `403` |
 | [`hsts`](pkg/hsts) | `Strict-Transport-Security` (with preload) |
-| [`redirect`](pkg/redirect) | HTTPS, www/non-www, and arbitrary redirects |
-| [`requestid`](pkg/requestid) | Inject and propagate a request ID |
+| [`redirect`](pkg/redirect) | HTTPS (driven by `X-Forwarded-Proto`), www/non-www, and arbitrary redirects — `301` by default, configurable `StatusCode` |
+| [`requestid`](pkg/requestid) | Inject and propagate a request ID — validated, configurable header, `TrustProxy` for edge use |
 | [`logger`](pkg/logger) | Structured request logging |
-| [`healthz`](pkg/healthz) | Health-check endpoint |
-| [`timeout`](pkg/timeout) | Per-request deadline enforcement |
-| [`fileserver`](pkg/fileserver) | Static file serving |
+| [`healthz`](pkg/healthz) | Liveness and readiness endpoint (readiness drains on graceful shutdown) |
+| [`timeout`](pkg/timeout) | Per-request deadlines — `Timeout` (time to response headers) and `RequestDeadline` (whole request, headers + body) |
+| [`fileserver`](pkg/fileserver) | Static file serving — optional directory listing, falls through to the chain on 404, path-confined to root (symlink-safe) |
 | [`stripprefix`](pkg/stripprefix) | Strip a URL path prefix before proxying |
 | [`authn`](pkg/authn) | JWT and basic-auth helpers |
 | [`waf`](pkg/waf) | Web application firewall driven by CEL expressions, hot reloadable |
-| [`prom`](pkg/prom) | Prometheus metrics |
+| [`prom`](pkg/prom) | Prometheus metrics — server (requests, connections, bytes), upstream, cache, WAF, rate-limit, and mirror collectors, plus a `/metrics` handler |
 | [`proxyprotocol`](pkg/proxyprotocol) | HAProxy PROXY protocol (v1/v2) — recover the real client IP behind an L4 load balancer |
-| [`h2push`](pkg/h2push) | HTTP/2 server push helpers |
-| [`gcp`](pkg/gcp), [`gcs`](pkg/gcs), [`stackdriver`](pkg/stackdriver), [`trace`](pkg/trace) | Google Cloud integrations and distributed tracing |
+| [`h2push`](pkg/h2push) | HTTP/2 server push — a fixed link, or driven by the upstream's `Link: rel=preload` response headers |
+| [`gcs`](pkg/gcs) | Serve static content from a Google Cloud Storage bucket — sets `Content-Type`/`Cache-Control` from object metadata, with main-page, not-found-page, and fallback-handler support |
+| [`gcp`](pkg/gcp), [`stackdriver`](pkg/stackdriver), [`trace`](pkg/trace) | Google Cloud integrations (LB real-client-IP extraction via `gcp.HLBImmediateIP`) and distributed tracing |
 
 ## Example
 
@@ -185,6 +187,63 @@ func wordpress() parapet.Middleware {
 }
 ```
 
+## Rate limiting
+
+[`ratelimit`](pkg/ratelimit) ships several strategies, all keyed per-client by
+default (`ClientIP`, which reads `X-Real-IP`):
+
+- **Fixed window** — `FixedWindowPerSecond/Minute/Hour(n)`.
+- **Sliding window** — `SlidingWindowPerSecond/Minute/Hour(n)`, smoother at the boundary.
+- **Leaky bucket** — `LeakyBucket(perRequest, size)` admits one request per `perRequest` interval, queueing up to `size` before dropping.
+- **Concurrent** — `Concurrent(n)` drops at capacity; `ConcurrentQueue(capacity, size)` instead queues up to `size` before dropping.
+
+Override `RateLimiter.Key` to limit by something other than IP, and
+`ExceededHandler` to change the over-limit response (default `429` with
+`Retry-After`). Wire `Observe` (and a bounded `Name` label) to count decisions:
+
+```go
+rl := ratelimit.FixedWindowPerSecond(60)
+rl.Name = "api"
+rl.Observe = prom.RateLimit() // parapet_ratelimit_total{name,result=allowed|limited}
+s.Use(rl)
+```
+
+### Distributed (Redis-backed) rate limiting
+
+`RedisFixedWindowPerSecond/Minute/Hour(runner, rate)` enforce one **global** limit
+across a fleet of proxies. parapet pulls in no Redis client — inject one through
+the tiny `RedisRunner` interface (a `RedisRunnerFunc` wraps any client):
+
+```go
+runner := ratelimit.RedisRunnerFunc(func(ctx context.Context, script string, keys []string, args ...any) (int64, error) {
+    return myRedis.Eval(ctx, script, keys, args...).Int64()
+})
+s.Use(ratelimit.RedisFixedWindowPerSecond(runner, 1000))
+```
+
+The constructors **fail open** on a Redis error or timeout (admit, trading strict
+limiting for availability) — the zero-value `RedisFixedWindowStrategy{}` fails
+**closed**. Because a fail-open admit lands in `result="allowed"`, wire
+`strategy.OnError = prom.RateLimitRedisError()` to surface the otherwise-silent
+`parapet_ratelimit_redis_errors_total` — the alertable "Redis is down, limits
+aren't enforced" signal. Tunables: `Max`, `Size`, `Prefix` (default `parapet:rl:`),
+`Timeout` (default 100 ms).
+
+## Compression
+
+[`compress`](pkg/compress) negotiates a response encoding from `Accept-Encoding`:
+`Gzip()`, `Deflate()`, `Zstd()`, and `Br()` (Brotli). Each returns a tunable
+`*Compress` whose `Types` (MIME allow-list, `*` for all), `MinLength` (default 860
+bytes), and `Vary` (default on) you can set; it skips already-encoded responses,
+WebSocket upgrades, and bodies below `MinLength`. Level variants exist:
+`GzipWithLevel(int)`, `ZstdWithLevel(zstd.EncoderLevel)`, and `BrWithQuality(int)` /
+`BrWithOption(cbrotli.WriterOptions)`.
+
+> ⚠️ **Brotli requires the `cbrotli` build tag** (and CGO + the `google/brotli` C
+> library). Without it, `compress.Br()` compiles to a **no-op pass-through** —
+> requests negotiate down to another encoding silently. Build with `-tags cbrotli`
+> to enable real Brotli; `BrWithOption` only exists under that tag.
+
 ## WAF with CEL rules
 
 The [`waf`](pkg/waf) package runs [CEL](https://github.com/google/cel-go) expressions against incoming requests. Rules compile inside `SetRules`, so the hot path never parses or type-checks, and rules can be swapped atomically at runtime.
@@ -211,7 +270,38 @@ s.Use(w)
 
 See [`pkg/waf/doc.go`](pkg/waf/doc.go) for the full list of `request.*` fields and helper functions exposed to expressions.
 
-## JWT authentication
+Each rule's `Action` is one of three:
+
+| Action | Effect |
+|---|---|
+| `ActionBlock` | Terminate the request with the rule's `Status` (default `403`) and `Message`. |
+| `ActionAllow` | Short-circuit the chain — forward the request immediately and stop evaluating further rules. An explicit allowlist for trusted health-checkers or internal scanners; give it a low `Priority` so it runs first. |
+| `ActionLog` | Record the match (via `WAF.Logger` / `WAF.OnMatch`) and keep evaluating. Shadow-deploy a new rule before switching it to `ActionBlock`. |
+
+**Fail-open by default.** A rule that errors at evaluation time — a recovered panic, a type mismatch, an exceeded `CostLimit`, or the per-request `EvalTimeout` (default 5 ms) — is logged and the request is **allowed through**, the safer default for a reverse proxy. Set `w.FailMode = waf.FailClosed` to instead reject such requests with `500`. `CostLimit` (CEL evaluation cost per rule) and `DisableMacros` harden the evaluator when rules come from a less-trusted source.
+
+**GeoIP / ASN filtering.** The WAF stays storage-agnostic: supply `w.Country func(*http.Request) string` and `w.ASN func(*http.Request) int64` (backed by a GeoIP database or an edge header) and rules can test `request.country == "TH"` or `request.asn == 13335`. Both keys are always present to expressions (empty string / `0` when unresolved), so referencing them never errors.
+
+**Observability.** `w.OnMatch` fires per matched rule (for custom metrics and alerts by rule ID); `w.Observe = prom.WAF()` fires once per evaluated request and records the rule-eval latency histogram `parapet_waf_eval_duration_seconds{outcome}` (`pass`/`allow`/`block`/`error`) — covering the common no-match path `OnMatch` can't see.
+
+```go
+w := waf.New()
+w.FailMode = waf.FailClosed       // reject on rule-eval error instead of allowing
+w.Country = geoipLookup           // func(*http.Request) string
+w.Observe = prom.WAF()            // rule-eval latency by outcome
+_ = w.SetRules([]waf.Rule{
+    {ID: "allow-internal", Expression: `ipInCidr(request.remote_ip, "10.0.0.0/8")`, Action: waf.ActionAllow, Priority: 100},
+    {ID: "geo-block", Expression: `request.country == "XX"`, Action: waf.ActionBlock, Status: http.StatusForbidden},
+})
+```
+
+`SetRules` validates and compiles the whole set atomically: a duplicate ID, an empty or non-boolean expression, or a compile error rejects the **entire** batch and leaves the previously loaded ruleset serving, so a bad deploy can't brick the WAF.
+
+## Authentication
+
+The [`authn`](pkg/authn) package ships JWT (static key or remote JWKS), HTTP Basic, and forward (external auth-server) authenticators. All wrap a common `authn.Authenticator` base, which you can use directly for a custom scheme.
+
+### JWT (bearer tokens)
 
 The [`authn`](pkg/authn) package verifies `Authorization: Bearer` tokens with
 `authn.JWT`. The accepted signature algorithms are **pinned by the caller** — a
@@ -229,6 +319,8 @@ import "github.com/moonrhythm/parapet/pkg/authn"
 m := authn.JWT([]byte(secret), authn.HS256) // []byte for HMAC; a public key for RS*/ES*/EdDSA
 m.Issuer = "https://issuer.example.com"
 m.Audience = "my-api"
+m.Leeway = 30 * time.Second // clock-skew tolerance on exp/nbf/iat; default 1m when zero
+m.Realm = "my-api"          // realm reported in the WWW-Authenticate challenge on rejection
 s.Use(m)
 
 // downstream
@@ -260,11 +352,60 @@ s.Use(m)
 `JWKS` exposes `RefreshInterval` (cache TTL, default 15m), `MinRefreshInterval`
 (unknown-`kid` refetch rate limit, default 1m), `Client`, and `MaxResponseBytes`.
 
+### Basic authentication
+
+`authn.Basic(user, pass)` checks `Authorization: Basic` credentials with a
+**constant-time** comparison (`crypto/subtle`), so timing leaks neither which
+field mismatched nor how many bytes matched. `Realm` is emitted in the
+`WWW-Authenticate` challenge. For a backend-backed check, set
+`BasicAuthenticator.Authenticate` and return `authn.ErrInvalidCredentials` on a
+miss:
+
+```go
+m := authn.Basic("admin", "s3cret")
+m.Realm = "admin"
+s.Use(m)
+
+// or verify against your own store:
+m := &authn.BasicAuthenticator{
+    Realm: "admin",
+    Authenticate: func(r *http.Request, user, pass string) error {
+        if !checkUser(user, pass) {
+            return authn.ErrInvalidCredentials
+        }
+        return nil
+    },
+}
+```
+
+### Forward authentication (external auth server)
+
+`authn.Forward` delegates the decision to a separate auth service — the same
+"auth request" / `auth_request` model as nginx and Traefik's ForwardAuth. It
+issues a `GET` to the configured URL, **allows** the request on a `2xx` and
+**rejects** it otherwise, relaying the auth server's status, headers, and body
+verbatim. It injects `X-Forwarded-Method`/`-Host`/`-Uri` (plus `-Proto`/`-For`)
+so the auth server can see the original request, and on a transport error it
+fails with `503 Auth Server Unavailable` rather than leaking the error.
+
+```go
+u, _ := url.Parse("http://auth.default.svc.cluster.local/auth")
+m := authn.Forward(u)
+m.AuthRequestHeaders = []string{"Cookie", "Authorization"} // default: all request headers (minus Content-Length)
+m.AuthResponseHeaders = []string{"X-Auth-User"}            // copied from the auth response onto the forwarded request
+s.Use(m)
+```
+
+By default every request header is forwarded to the auth server; set
+`AuthRequestHeaders` to forward only a subset. `AuthResponseHeaders` are copied
+from the auth response onto the downstream request, so the backend receives
+identity headers (e.g. `X-Auth-User`) the auth server resolved.
+
 ## Response caching
 
 The [`cache`](pkg/cache) package is a CDN-style, honor-origin response cache. It caches a response **only** when the origin opts in with explicit freshness (`Cache-Control: s-maxage`/`max-age` or `Expires`); refuses `private`/`no-store`/`no-cache`, `Set-Cookie`, and `Vary: *`; honors `Vary`; serves `GET`/`HEAD` only; and ignores the client's request `Cache-Control` so a client can't bust the shared cache. Concurrent misses for one key collapse into a single origin fetch (single-flight), and it's fail-static — any storage error degrades to a miss, never an error to the client. Every response is tagged `X-Cache: HIT|MISS`.
 
-Two storage backends ship: an in-memory one (lost on restart) and a disk-backed one (survives restarts, streams bodies to disk). Both bound their total size with LRU eviction plus a per-object cap. Mount it ahead of the upstream/handler whose responses it should cache.
+Two storage backends ship: an in-memory one (lost on restart) and a disk-backed one (survives restarts, streams bodies to disk). Both bound their total size with LRU eviction plus a per-object cap. `cache.Storage` is a public interface (with `EntryWriter` and `Meta`) — implement it to back the cache with your own store (Redis, S3, …). Mount it ahead of the upstream/handler whose responses it should cache.
 
 ```go
 import "github.com/moonrhythm/parapet/pkg/cache"
@@ -360,7 +501,20 @@ pt.FlushAll()                           // everything
 go func() { for range time.Tick(5 * time.Minute) { pt.Reap(store) } }() // proactively reclaim bytes
 ```
 
-`Snapshot`/`Restore` serialize the table so purges survive a restart (persist however you like). It's the engine [parapet-ingress-controller](https://github.com/moonrhythm/parapet-ingress-controller) builds its control-plane purge distribution on top of.
+`Snapshot`/`Restore` serialize the table so purges survive a restart (persist however you like), and `Table.Stats()` returns a snapshot of per-scope record counts and the cap-fold count for diagnostics. The per-scope cap that triggers the global-flush fold is tunable with `purge.New(purge.WithMaxRecords(n))` (default 65536). It's the engine [parapet-ingress-controller](https://github.com/moonrhythm/parapet-ingress-controller) builds its control-plane purge distribution on top of.
+
+Surrogate keys come from the origin's `Cache-Tag` header; it is captured but **left on the response** (strip it at the origin if it must not reach clients), and an entry keeps at most 64 tags of up to 256 chars each.
+
+### Observability
+
+`Options.OnResult` (a `cache.ResultFunc`) is called once per served request with the outcome, exposing two states the `X-Cache` header can't: a `stale-if-error` fallback (also `STALE` on the wire) and a `BYPASS` (which sends no `X-Cache` at all). Two ready-made consumers ship:
+
+```go
+cache.New(store, cache.Options{OnResult: prom.Cache()}) // metrics
+// or cache.LogResult to add a `cacheStatus` field to the access log
+```
+
+`prom.Cache()` emits `parapet_cache_total{host,result}` (`HIT|MISS|STALE|STALE_ERROR|BYPASS`; hit ratio = `HIT / all`) and `parapet_cache_fill_duration_seconds{host}` (origin-fill latency, observed only when the origin is contacted).
 
 ## Weighted and least-connection load balancing
 
@@ -392,6 +546,8 @@ s.Use(upstream.New(upstream.NewWeightedRoundRobinLoadBalancer([]*upstream.Target
 	{Host: "10.0.0.2:8080", Transport: &upstream.HTTPTransport{}, Weight: 1},
 })))
 ```
+
+Make the bulkhead observable: set `lb.OnShed = prom.UpstreamShed()` to count load-shed events by cause in `parapet_upstream_shed_total{reason}` (`saturated` = bulkhead full, `all_dark` = the active-health-check pool is down, `empty` = no targets), and call `prom.UpstreamInflight(lb)` to export scrape-time gauges `parapet_upstream_inflight{host}` and `parapet_upstream_inflight_capacity{host}` (from `LeastConnLoadBalancer.Inflight()`). A target pinned at `inflight/capacity == 1` is the one driving `shed_total{reason="saturated"}`.
 
 ## Load balancing with passive health checks
 
@@ -427,8 +583,13 @@ ejections take effect: traffic shifts off a failing backend in
 `parapet_upstream_requests{host,status}`. Wire each reliability balancer's
 `OnStateChange` to `prom.UpstreamState()` to make the state machine itself
 observable — `parapet_upstream_state_transitions_total{host,from,to,reason}`
-(trips, ejections, recoveries, half-open probes) plus a current-state gauge — and
-`prom.Upstream()` also counts fail-fast 503s in `parapet_upstream_fast_rejects_total`.
+(trips, ejections, recoveries, half-open probes) plus a current-state gauge and,
+from `ActiveHealthCheck`, `parapet_upstream_probe_down_total{host,cause}` (cause =
+`timeout`/`refused`/`reset`/`dns`/`tls`/`status`/`error`). `prom.Upstream()` also
+records a per-target time-to-first-byte histogram
+`parapet_upstream_request_duration_seconds{host}` (once per round-trip attempt, so
+retries count individually) and counts fail-fast 503s in
+`parapet_upstream_fast_rejects_total`.
 
 `upstream.NewCircuitBreakingLoadBalancer` goes a step further: it **fails fast**.
 An open target is rejected *without a round-trip* (so a request never pays the
@@ -472,6 +633,51 @@ lb.EjectionFactor = 3 // eject a target 3× slower than the pool median
 s.Use(upstream.New(lb))
 ```
 
+The guard rails are tunable too: `MaxEjectionPercent` (default 30) caps how much
+of the pool can be ejected at once, and `PanicThreshold` (default 50) stops
+ejecting entirely when too many targets look slow. Other knobs — `MinSamples`
+(100), `MinHosts` (3), `HalfLife` (10 s decay), `MinEjectDelta` (50 ms),
+`MinEjectLatency` (off), and `EjectTimeout`/`MaxEjectTimeout` (30 s → 5 m backoff)
+— have sensible defaults.
+
+## Upstream transports and routing
+
+A `Target.Transport` picks the wire protocol: `HTTPTransport`, `H2CTransport`,
+`HTTPSTransport`, `UnixTransport` (dial a Unix socket), or the dynamic
+multi-scheme `Transport`. Each of the first three and the dynamic one exposes an
+optional `DialContext` seam to replace the default `net.Dialer` — to observe dial
+errors, re-resolve endpoints, or wrap the connection. (Setting `DialContext`
+makes `DialTimeout` a no-op — the custom dialer owns its timeouts; `UnixTransport`
+has no seam.)
+
+`Upstream` also rewrites the proxied request: `Upstream.Host` overrides the
+`Host` header sent to the backend, and `Upstream.Path` prefixes a base path onto
+the request path so a backend can be mounted under a subpath (the inverse of
+[`stripprefix`](pkg/stripprefix)).
+
+## Retries
+
+Every `upstream.Upstream` automatically **retries a failed transport round-trip**
+up to `Retries` times (default 3) with exponential backoff (`BackoffFactor <<
+attempt`, default base 50 ms). Only eligible requests are retried: by default an
+idempotent method (`GET`/`HEAD`/`OPTIONS`/`TRACE`) whose body is absent or
+rewindable (`r.GetBody != nil`, so each attempt can resend the full body). Set
+`Upstream.RetryPolicy` to widen eligibility (e.g. an idempotent `PUT`/`DELETE`)
+or narrow it.
+
+```go
+up := upstream.New(lb)
+up.Retries = 2
+up.BackoffFactor = 20 * time.Millisecond
+s.Use(up)
+```
+
+> ⚠️ **Retry amplification.** An eligible request can hit upstreams up to
+> `Retries+1` times, and if the same `Upstream` is fronted by a
+> `HedgingLoadBalancer`, each attempt fans out to `MaxHedge` more — worst case
+> ≈ `(Retries+1) × (MaxHedge+1)` origin calls. Never mark a non-idempotent
+> request retryable: a retried `POST` can double-apply a side effect.
+
 ## Hedging (speculative retry)
 
 `upstream.NewHedgingLoadBalancer` wraps any balancer to cut **tail latency**: if an
@@ -491,6 +697,14 @@ already inside the retry loop, pass straight through. Because losing legs are
 cancelled with `context.Canceled`, a custom `IsFailure` on the wrapped balancer
 must exclude it (the default does), or hedging would slowly eject the healthy
 backend it raced.
+
+Three hooks tune the race. `HedgeOnError` launches the next hedge immediately on
+a losing transport error instead of waiting out `HedgeDelay` — it is **on** when
+built with `NewHedgingLoadBalancer` but **off** for a bare `HedgingLoadBalancer{}`
+literal, so prefer the constructor. `IsHedgeable` overrides the default
+eligibility rule (idempotent, body-less, not already retrying), and `IsWinner`
+overrides the default "any non-error response wins" predicate — e.g. to keep
+racing when a leg returns a 5xx.
 
 ## Active health checks
 
@@ -529,7 +743,37 @@ set `ProbeTransport` to isolate probe traffic. A held probe is bounded by `Timeo
 and targets begin **up** by default (`StartUnhealthy` flips to fail-closed) so a
 misconfigured probe path cannot black-hole a fresh deploy. The probe uses `http`;
 for a target on the dynamic multi-scheme `Transport` set `ahc.Scheme` to `"h2c"` or
-`"unix"` (the dedicated transports force their own scheme and ignore it).
+`"unix"` (the dedicated transports force their own scheme and ignore it). The probe
+method defaults to `GET` (`ahc.Method` overrides it), and `ahc.IsHealthy` overrides
+the default "a non-error response with status < 400 is healthy" check.
+
+## Request timeouts
+
+[`timeout`](pkg/timeout) offers two deadlines that bound **different** spans:
+
+- **`timeout.New(d)`** (`Timeout`) is a **write-header** deadline. It fires only
+  until the upstream writes response headers, then disarms — a backend that sends
+  headers and stalls mid-body is **not** bounded by it. On expiry it sends a
+  default `504 Gateway Timeout`; set `Timeout.TimeoutHandler` to customize that
+  response (e.g. add a `Retry-After`).
+- **`timeout.NewRequestDeadline(d)`** (`RequestDeadline`) is a **total-request**
+  deadline (headers + body), implemented as a request-context deadline the
+  upstream transports honor — so it *does* abort a backend that stalls mid-body
+  (the gap that lets a stalled stream latch a `MaxConcurrent` bulkhead slot). It
+  writes no response of its own; the cancelled context propagates and
+  [`upstream`](pkg/upstream) surfaces a `502`/`504`.
+
+```go
+api := location.Prefix("/api")
+api.Use(timeout.NewRequestDeadline(30 * time.Second)) // total time for these routes
+api.Use(upstream.New(lb))
+s.Use(api)
+```
+
+> ⚠️ A total-request deadline **kills** Server-Sent Events, streaming responses,
+> WebSocket-style upgrades, and large downloads. Never apply `RequestDeadline`
+> globally — scope it **per-route** (via [`location`](pkg/location) or
+> [`block`](pkg/block)) and exclude streaming endpoints.
 
 ## Choosing a reliability primitive
 
@@ -584,13 +828,95 @@ s.Use(upstream.SingleHost("prod:8080", &upstream.HTTPTransport{}))
 ```
 
 A fixed worker pool (`Workers`, default 8) bounds mirror concurrency; a full
-`QueueSize` queue drops rather than blocking. The request body is buffered up front
-(bounded by `MaxBodyBytes`) so the primary and the mirror read byte-identical bytes;
-an over-cap body skips the mirror. Each mirror runs on a detached
+`QueueSize` queue drops rather than blocking. Effective concurrency is `Workers`,
+not `Workers + QueueSize` — the queue only absorbs bursts that drain at worker
+speed, so size `Workers` for the canary's latency. The request body is buffered up
+front (bounded by `MaxBodyBytes`) so the primary and the mirror read byte-identical
+bytes; an over-cap body skips the mirror (or set `DisableBody` to mirror with no
+body at all, for large-payload services). Each mirror runs on a detached
 `context.Background()` deadline (`Timeout`), so a client disconnect never cancels it.
-The mirrored request is marked (`X-Mirror: 1` by default; `DisableMark` to go fully
-transparent) so the canary can no-op side effects. End-to-end credentials are
-replayed by design — use `Match` to exclude sensitive routes.
+The mirrored request is marked (`X-Mirror: 1` by default; override with
+`MarkHeader`/`MarkValue`, or `DisableMark` to go fully transparent) so the canary
+can no-op side effects. End-to-end credentials are replayed by design — use `Match`
+to exclude sensitive routes.
+
+`Observe` is a `func(mirror.MirrorInfo)` — `prom.Mirror()` is one implementation,
+emitting `parapet_mirror_total{outcome}` (`dispatched`/`completed`/`dropped_full`/
+`dropped_oversize`/`panicked`) and `parapet_mirror_request_duration_seconds`. A
+custom hook runs **synchronously** (on the request goroutine for dispatch/drop
+outcomes, on workers for completed/panicked), so keep it fast and concurrency-safe;
+`Mirror.Stats()` exposes the same counters without wiring `Observe`. All config and
+the destination chain are read once and **frozen on the first request** — set them
+before serving (a later `Use` is silently ignored). The pool has no `Close` and
+lives for the process lifetime, so construct one `Mirror` per destination and reuse it.
+
+## TLS and server configuration
+
+Enable HTTPS by setting `Server.TLSConfig` to a `*tls.Config` (with `Certificates`
+or a `GetCertificate` callback for SNI/ACME). `Serve`/`ListenAndServe` then call
+`ServeTLS`, and the listen address defaults to `:443` when `Addr` is empty. For
+dev or internal TLS, `parapet.GenerateSelfSignCertificate(parapet.SelfSign{...})`
+builds a `tls.Certificate` (RSA-2048, 10-year default validity; each `Hosts` entry
+becomes an IP SAN if it parses as an IP, otherwise a DNS SAN).
+
+```go
+s := parapet.NewFrontend()
+cert, _ := parapet.GenerateSelfSignCertificate(parapet.SelfSign{Hosts: []string{"localhost", "127.0.0.1"}})
+s.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+// s.Addr == "" → serves HTTPS on :443
+```
+
+**Graceful shutdown.** `ListenAndServe` traps `SIGTERM` and drains in-flight
+requests. `WaitBeforeShutdown` (default 10 s) sleeps first — so load balancers
+notice the instance leaving — then `GraceTimeout` (default 30 s) bounds the drain;
+setting `GraceTimeout <= 0` disables the built-in `SIGTERM` handling. Register
+cleanup with `Server.RegisterOnShutdown(func())` (safe to call concurrently, runs
+each callback once); it's the seam [`healthz`](pkg/healthz) and `ActiveHealthCheck`
+use to deregister during the drain.
+
+**Other tunables.** `ReadTimeout`, `ReadHeaderTimeout`, `WriteTimeout`,
+`IdleTimeout`, and `MaxHeaderBytes` map onto the embedded `http.Server`, while
+`TCPKeepAlivePeriod` is applied to accepted connections at the listener. The
+constructors pick role-appropriate defaults — e.g. `NewFrontend` sets a 10 s
+`ReadHeaderTimeout` and 1 m read/write timeouts. Set
+`Server.ReusePort = true` to bind the listener with `SO_REUSEPORT` for
+zero-downtime restarts and cross-process load distribution. All `Server` fields
+must be set before serving.
+
+## Health checks
+
+[`healthz`](pkg/healthz) serves both Kubernetes probes from one endpoint:
+`GET <Path>` is **liveness** (driven by `Set(bool)`), and `GET <Path>?ready=1` is
+**readiness** (driven by `SetReady(bool)`). Readiness automatically returns `503`
+once the `parapet.Server` enters graceful shutdown — so a load balancer drains the
+instance — while liveness stays `200` to avoid a restart mid-drain. `Path` defaults
+to `/healthz`, and `Set`/`SetReady` let background checks flip the flags (fail
+readiness while warming up, fail liveness when a dependency dies).
+
+By default the endpoint only answers when the `Host` header is an IP (suiting
+kubelet/LB probes that address the pod by IP) and passes hostname-addressed
+requests through to the next handler; set `Host = true` to answer those too.
+
+## Request IDs
+
+[`requestid`](pkg/requestid) injects an `X-Request-Id` (set `Header` to use another
+key), writes it on **both** the forwarded request and the response, and records it
+as the `requestId` field in the access log. `New()` defaults `TrustProxy = true`,
+reusing a valid incoming ID for trace continuity — but an incoming ID is accepted
+only if it passes a conservative charset check and is ≤ 128 bytes, otherwise a
+fresh UUIDv4 replaces it. **At the edge, set `TrustProxy = false`** so clients
+can't spoof or poison the ID that flows into your logs and upstreams.
+
+## Logging
+
+[`logger`](pkg/logger) emits one structured JSON record per request.
+`logger.Stdout()` and `logger.Stderr()` are the ready-made constructors (or set
+`Logger.Writer` to any `io.Writer`); `OmitEmpty` drops empty fields and is on by
+default for `Stdout`/`Stderr` but off for a bare `Logger{}`. Downstream handlers
+enrich the record with `logger.Set(r.Context(), "userID", id)` (read back with
+`logger.Get`) — a no-op when no `Logger` is mounted upstream. A client-cancelled
+request is logged with the synthetic status `499`, and `logger.Disable()` silences
+logging for a route (as the health-check block in the example does).
 
 ## Trusted proxies
 
@@ -618,7 +944,14 @@ s.ModifyConnection(pp.ModifyConnection)
 
 Set `Require` to reject a trusted connection that arrives without a PROXY header
 (use it when every connection from the balancer is guaranteed to carry one); by
-default such a connection is served with its real peer address.
+default such a connection is served with its real peer address. `HeaderTimeout`
+(default 10 s; negative disables) bounds how long a trusted connection has to
+deliver its header, so a stalled connection can't hold a slot during the parse.
+
+> ⚠️ `proxyprotocol.New()` with **no** CIDRs trusts every peer — any client could
+> then spoof its address via a PROXY header — so it is safe only when the listener
+> is reachable exclusively through the load balancer. An invalid CIDR string panics
+> at startup.
 
 ## Performance tuning
 
@@ -650,6 +983,46 @@ hsts.HSTS{MaxAge: 365 * 24 * time.Hour, ShareValueSlice: true}
 
 The same caveat applies — only enable it when nothing in the chain mutates that
 response header's value slice in place.
+
+## Prometheus metrics
+
+[`prom`](pkg/prom) collects into a shared registry and exposes it two ways: mount
+`prom.Handler()` on a route, or run `prom.Start(addr)` as a standalone scrape
+server. `prom.Registry()` returns the registry and `prom.Namespace` (default
+`parapet`) is the prefix on every series name.
+
+The three server-wide collectors instrument the whole chain. `prom.Requests()` is
+a middleware; `prom.Connections` and `prom.Networks` take the `*Server` (they wire
+`ConnState`/`ModifyConnection`, so call them rather than `Use`):
+
+```go
+s := parapet.NewFrontend()
+s.Use(prom.Requests())   // parapet_requests{host,status,method}
+prom.Connections(s)      // parapet_connections{state}
+prom.Networks(s)         // parapet_network_request_bytes / _response_bytes
+
+// expose them
+{
+    l := location.Exact("/metrics")
+    l.Use(prom.Handler())
+    s.Use(l)
+}
+// …or: go prom.Start(":9187")
+```
+
+Every observable feature exposes a hook you assign a `prom.*` adapter to:
+
+| Wire | Metrics |
+|---|---|
+| `up.OnRoundTrip = prom.Upstream()` | `upstream_requests{host,status}`, `upstream_request_duration_seconds{host}`, `upstream_fast_rejects_total{host}` |
+| `lb.OnStateChange = prom.UpstreamState()` | `upstream_state_transitions_total`, `upstream_breaker_state`, `upstream_probe_down_total{host,cause}` |
+| `prom.UpstreamInflight(lb)` / `lb.OnShed = prom.UpstreamShed()` | `upstream_inflight{host}` + `_capacity{host}`, `upstream_shed_total{reason}` |
+| `rl.Observe = prom.RateLimit()` / `strategy.OnError = prom.RateLimitRedisError()` | `ratelimit_total{name,result}`, `ratelimit_redis_errors_total` |
+| `cache.Options{OnResult: prom.Cache()}` | `cache_total{host,result}`, `cache_fill_duration_seconds{host}` |
+| `w.Observe = prom.WAF()` | `waf_eval_duration_seconds{outcome}` |
+| `mr.Observe = prom.Mirror()` | `mirror_total{outcome}`, `mirror_request_duration_seconds` |
+
+All series carry the `prom.Namespace` prefix (shown unprefixed above).
 
 ## License
 
