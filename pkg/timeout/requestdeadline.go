@@ -19,12 +19,12 @@ func NewRequestDeadline(d time.Duration) *RequestDeadline {
 // (parapet's upstream transports do) then aborts the in-flight call, including a
 // backend that has already written headers but stalls mid-body.
 //
-// # How it differs from Timout
+// # How it differs from Timeout
 //
-//   - [Timout] is a write-header deadline: it fires only until the upstream
+//   - [Timeout] is a write-header deadline: it fires only until the upstream
 //     writes response headers, then stops mattering (its timeoutRW is irrelevant
 //     once headers are written). A backend that sends headers and then stalls
-//     mid-body is NOT bounded by Timout. On expiry Timout writes its own 504
+//     mid-body is NOT bounded by Timeout. On expiry Timeout writes its own 504
 //     Gateway Timeout response.
 //   - RequestDeadline is a TOTAL request deadline (headers + body). It is a bare
 //     context wrapper: no SSE detection, no streaming heuristics, no response
@@ -43,7 +43,7 @@ func NewRequestDeadline(d time.Duration) *RequestDeadline {
 // all traffic permanently: the cap becomes a latch, not a limiter. Capping TOTAL
 // request time via a request-scoped context deadline the transport honors is the
 // in-tree mitigation, and that is exactly what RequestDeadline provides — which
-// Timout cannot, since it disarms once upstream headers are written.
+// Timeout cannot, since it disarms once upstream headers are written.
 //
 // # WARNING: do not blanket-deploy
 //
@@ -55,7 +55,7 @@ func NewRequestDeadline(d time.Duration) *RequestDeadline {
 // genuinely should be bounded, and exclude streaming/download routes.
 //
 // A Timeout (this field) of <= 0 makes ServeHandler a pass-through no-op,
-// matching [Timout].
+// matching [Timeout].
 type RequestDeadline struct {
 	Timeout time.Duration
 }

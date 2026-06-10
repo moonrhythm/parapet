@@ -104,24 +104,3 @@ func TestRequestDeadlineNegativeIsPassThrough(t *testing.T) {
 
 	assert.Equal(t, handlerPtr(inner), handlerPtr(h))
 }
-
-func TestTimeoutAliasUsable(t *testing.T) {
-	t.Parallel()
-
-	// The Timeout alias is interchangeable with Timout: a Timout value is
-	// accepted where a Timeout is required (they are the same underlying type),
-	// and a Timeout value is usable as a middleware.
-	takesTimeout := func(Timeout) {}
-	takesTimeout(Timout{Timeout: time.Second})
-
-	m := Timeout{Timeout: time.Second}
-	h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusTeapot)
-	}))
-
-	r := httptest.NewRequest("GET", "/", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, r)
-
-	assert.Equal(t, http.StatusTeapot, w.Code)
-}

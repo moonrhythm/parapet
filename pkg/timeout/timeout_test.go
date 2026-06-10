@@ -83,7 +83,7 @@ func TestTimeoutCustomHandler(t *testing.T) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte("custom"))
 	})
-	m := &Timout{Timeout: 20 * time.Millisecond, TimeoutHandler: custom}
+	m := &Timeout{Timeout: 20 * time.Millisecond, TimeoutHandler: custom}
 
 	h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()

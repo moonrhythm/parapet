@@ -10,23 +10,20 @@ import (
 )
 
 // New creates timeout middleware
-func New(timeout time.Duration) *Timout {
-	return &Timout{Timeout: timeout}
+func New(timeout time.Duration) *Timeout {
+	return &Timeout{Timeout: timeout}
 }
 
-// Timout sets a write header timeout
-type Timout struct {
+// Timeout sets a write header timeout. It fires only until the upstream writes
+// response headers; a backend that writes headers then stalls mid-body is NOT
+// bounded by it — use [RequestDeadline] for a total-request deadline.
+type Timeout struct {
 	TimeoutHandler http.Handler
 	Timeout        time.Duration
 }
 
-// Timeout is a non-breaking alias for [Timout] (the struct name carries a
-// long-standing typo). New code should spell it Timeout; existing Timout users
-// keep working unchanged, since this is a type alias, not a new type.
-type Timeout = Timout
-
 // ServeHandler implements middleware interface
-func (m Timout) ServeHandler(h http.Handler) http.Handler {
+func (m Timeout) ServeHandler(h http.Handler) http.Handler {
 	if m.Timeout <= 0 {
 		return h
 	}
