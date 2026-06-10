@@ -33,10 +33,14 @@ func NewHedgingLoadBalancer(next http.RoundTripper) *HedgingLoadBalancer {
 // client.
 //
 // It is a drop-in http.RoundTripper for upstream.New and composes with every
-// balancer. Only idempotent body-less requests are hedged (GET/HEAD/OPTIONS/TRACE,
-// like the retry path), and a request already inside the proxy's retry loop is not
-// additionally hedged — retries and hedges layer, never multiply. HedgeDelay <= 0
-// disables hedging entirely (no timer, no clone, no goroutine).
+// balancer. Only idempotent body-LESS requests are hedged (GET/HEAD/OPTIONS/TRACE
+// with no body); this is deliberately stricter than the Upstream retry path, which
+// also retries rewindable (GetBody) body-bearing requests. A hedge launches a
+// second concurrent leg, and r.Clone only shallow-copies Body, so two legs would
+// share one reader — hedging a body-bearing request without per-leg GetBody rewind
+// would let a leg send a consumed/empty body. A request already inside the proxy's
+// retry loop is not additionally hedged — retries and hedges layer, never multiply.
+// HedgeDelay <= 0 disables hedging entirely (no timer, no clone, no goroutine).
 //
 // The wrapped balancer's Next.RoundTrip MUST honor request-context cancellation
 // (every transport in this package does): a hedge cancels the losing legs, so a
@@ -96,8 +100,18 @@ func (l *HedgingLoadBalancer) hedgeable(r *http.Request) bool {
 	if l.IsHedgeable != nil {
 		return l.IsHedgeable(r)
 	}
-	if !canRetry(r) {
+	// Hedging is body-LESS by default, deliberately STRICTER than the Upstream
+	// retry path's canRetry. A hedge launches a SECOND concurrent leg; r.Clone
+	// only shallow-copies Body, so two legs would share — and race/consume — one
+	// reader. Rewinding via GetBody per leg would be needed to hedge a
+	// body-bearing request safely; until that is implemented, a request carrying a
+	// body (even a rewindable GetBody one) is NOT hedged, so no leg can ever send a
+	// consumed/empty body. Set IsHedgeable to override.
+	if !canMethodRetry(r.Method) {
 		return false
+	}
+	if r.Body != nil && r.Body != http.NoBody {
+		return false // body-bearing: not hedged (see above)
 	}
 	_, retrying := r.Context().Value(retryContextKey{}).(int)
 	return !retrying // a request already inside the retry loop is not re-hedged
