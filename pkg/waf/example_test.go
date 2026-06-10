@@ -114,3 +114,23 @@ func ExampleWAF_geo() {
 	s := parapet.NewFrontend()
 	s.Use(w)
 }
+
+// Observe fires once per evaluated request regardless of outcome, so it can
+// answer "how much is the WAF costing me" on the common no-match path that
+// OnMatch never sees. Wire prom.WAF() for a histogram, or a custom hook.
+func ExampleWAF_observe() {
+	w := waf.New()
+	_ = w.SetRules([]waf.Rule{{
+		ID:         "block-sqli",
+		Expression: `request.query.contains("' OR '1'='1")`,
+		Action:     waf.ActionBlock,
+	}})
+
+	w.Observe = func(ev waf.EvalEvent) {
+		// Fires on pass/allow/block/error alike; ev.Duration is rule-eval time.
+		log.Printf("waf eval outcome=%s took=%s", ev.Outcome, ev.Duration)
+	}
+
+	s := parapet.NewFrontend()
+	s.Use(w)
+}
