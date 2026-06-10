@@ -2,10 +2,14 @@ package upstream
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"io"
+	"net"
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/moonrhythm/parapet"
@@ -128,6 +132,19 @@ type ActiveHealthCheck struct {
 	// IsHealthy decides whether a probe result is healthy; nil treats a non-error
 	// response with status < 400 as healthy.
 	IsHealthy func(resp *http.Response, err error) bool
+
+	// OnStateChange observes this target's active-health gate flipping: ReasonProbeDown
+	// (UnhealthyThld consecutive failing probes took an up target down, From StateClosed
+	// To StateOpen, carrying a classified ProbeCause) and ReasonProbeRecover (HealthyThld
+	// consecutive successes readmitted a down one, From StateOpen To StateClosed,
+	// CauseNone). nil disables it at zero cost. It fires synchronously on the target's
+	// sole prober goroutine, exactly once per crossing, AFTER the gate bit is published;
+	// the callee owns its own concurrency across targets (see prom.UpstreamState). The
+	// initial gate (StartUnhealthy or not) is NOT a transition and fires nothing — with
+	// StartUnhealthy the first admitting probe is a genuine ReasonProbeRecover. A
+	// graceful shutdown / Close never emits a spurious ReasonProbeDown. The ProbeCause
+	// label is a bounded closed set.
+	OnStateChange StateChangeFunc
 }
 
 // probeTarget holds one target's probe state. up is the only cross-goroutine field
@@ -303,7 +320,11 @@ func (a *ActiveHealthCheck) probe(ctx context.Context, pt *probeTarget) {
 	// parsed from a URL string, and the dynamic Transport dispatches on the right scheme.
 	req, err := http.NewRequestWithContext(pctx, a.Method, "http://"+probePlaceholderHost+a.Path, http.NoBody)
 	if err != nil {
-		a.observe(pt, false)
+		// A malformed request config is a real failure, not a backend verdict — but
+		// check the parent ctx first so a Close racing here is still suppressed.
+		if ctx.Err() == nil {
+			a.observe(pt, false, CauseError)
+		}
 		return
 	}
 	req.URL.Scheme = a.Scheme
@@ -323,24 +344,49 @@ func (a *ActiveHealthCheck) probe(ctx context.Context, pt *probeTarget) {
 		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, probeDrainLimit))
 		_ = resp.Body.Close()
 	}
-	a.observe(pt, a.healthy(resp, rerr))
+
+	// Shutting down: the PARENT ctx (prober lifetime) was cancelled by Close /
+	// graceful shutdown, so the in-flight RoundTrip returns context.Canceled. That is
+	// not a backend verdict — drop it so Close never darkens the gate or fires a
+	// spurious ReasonProbeDown on the way out. A per-probe Timeout differs: only pctx
+	// expired, ctx.Err() is nil here, so it falls through as a real failure.
+	if ctx.Err() != nil {
+		return
+	}
+
+	ok := a.healthy(resp, rerr)
+	var cause ProbeCause
+	if !ok {
+		cause = classifyProbeCause(resp, rerr)
+	}
+	a.observe(pt, ok, cause)
 }
 
-// observe applies one probe verdict to pt's consecutive-run counters and flips the
-// published up bit on a threshold crossing. Runs only on pt's own goroutine.
-func (a *ActiveHealthCheck) observe(pt *probeTarget, ok bool) {
+// observe applies one probe verdict to pt's consecutive-run counters, flips the
+// published up bit on a threshold crossing, and (only then) fires OnStateChange for
+// that crossing. cause classifies a failing probe and is consulted only on the down
+// crossing (a recover carries CauseNone). Runs only on pt's own goroutine, so the run
+// counters stay single-writer and the hook fires on the goroutine that commits the
+// transition.
+func (a *ActiveHealthCheck) observe(pt *probeTarget, ok bool, cause ProbeCause) {
 	if ok {
 		pt.failRun = 0
 		pt.okRun++
 		if pt.okRun >= a.HealthyThld && !pt.up.Load() {
-			pt.up.Store(true)
+			pt.up.Store(true) // down -> up (covers the StartUnhealthy first-success recover)
+			if a.OnStateChange != nil {
+				a.OnStateChange(StateChange{Host: pt.target.Host, From: StateOpen, To: StateClosed, Reason: ReasonProbeRecover})
+			}
 		}
 		return
 	}
 	pt.okRun = 0
 	pt.failRun++
 	if pt.failRun >= a.UnhealthyThld && pt.up.Load() {
-		pt.up.Store(false)
+		pt.up.Store(false) // up -> down
+		if a.OnStateChange != nil {
+			a.OnStateChange(StateChange{Host: pt.target.Host, From: StateClosed, To: StateOpen, Reason: ReasonProbeDown, Cause: cause})
+		}
 	}
 }
 
@@ -349,4 +395,48 @@ func (a *ActiveHealthCheck) healthy(resp *http.Response, err error) bool {
 		return a.IsHealthy(resp, err)
 	}
 	return err == nil && resp != nil && resp.StatusCode < 400
+}
+
+// classifyProbeCause maps a failed probe result to a bounded ProbeCause for the
+// down-event label. Called only on the cold unhealthy path, after probe() has
+// filtered the shutdown-cancel, so context.Canceled is unreachable here. The ladder
+// is most-specific-first and traverses wrapping via errors.Is/errors.As; the
+// catch-all is CauseError so the label set stays closed.
+func classifyProbeCause(resp *http.Response, err error) ProbeCause {
+	if err == nil {
+		return CauseStatus // no transport error, but healthy() rejected the response (default: status >= 400, or a custom IsHealthy returned false)
+	}
+	// A *net.DNSError is a name-resolution failure by construction, so classify it as
+	// dns regardless of whether it timed out. This MUST precede the DeadlineExceeded
+	// rung: a resolver lookup timeout wraps context.DeadlineExceeded (Go 1.23+
+	// DNSError.Unwrap), so the deadline rung would otherwise swallow it and mislabel a
+	// DNS outage as a too-tight Timeout — the exact triage misdirection ProbeCause
+	// exists to prevent. A genuinely too-tight Timeout still surfaces as timeout on the
+	// non-DNS dial/response paths below.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return CauseDNS
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return CauseTimeout // the per-probe pctx deadline (non-DNS); parent-cancel was already filtered in probe()
+	}
+	var certErr *tls.CertificateVerificationError
+	var recErr tls.RecordHeaderError
+	if errors.As(err, &certErr) || errors.As(err, &recErr) {
+		return CauseTLS // cert distrust/expiry, or TLS spoken to a plaintext port (or vice-versa)
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return CauseRefused
+	}
+	if errors.Is(err, syscall.ECONNRESET) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return CauseReset // peer reset or closed the connection unexpectedly
+	}
+	// Defensive catch-all for a non-stdlib net.Error that reports Timeout() without
+	// wrapping context.DeadlineExceeded; stdlib transport timeouts already satisfy the
+	// DeadlineExceeded rung above.
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return CauseTimeout
+	}
+	return CauseError
 }
