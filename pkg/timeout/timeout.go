@@ -20,6 +20,11 @@ type Timout struct {
 	Timeout        time.Duration
 }
 
+// Timeout is a non-breaking alias for [Timout] (the struct name carries a
+// long-standing typo). New code should spell it Timeout; existing Timout users
+// keep working unchanged, since this is a type alias, not a new type.
+type Timeout = Timout
+
 // ServeHandler implements middleware interface
 func (m Timout) ServeHandler(h http.Handler) http.Handler {
 	if m.Timeout <= 0 {
