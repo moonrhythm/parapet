@@ -70,6 +70,16 @@ type WAF struct {
 	// Runs synchronously on the request goroutine — keep it cheap.
 	OnMatch func(MatchEvent)
 
+	// Observe is invoked exactly once per request that reaches rule evaluation,
+	// after evaluation terminates, with the terminal Outcome and the rule-eval
+	// Duration. Optional. Runs synchronously on the request goroutine just
+	// before the request is forwarded or rejected — keep it cheap. Unlike
+	// OnMatch (per matched rule, only on a match), it fires on every path, so it
+	// answers "how much does the WAF cost per request". Wire prom.WAF() here for
+	// a latency histogram. The no-rules fast path does NOT call Observe (no
+	// evaluation happened).
+	Observe func(EvalEvent)
+
 	// EvalTimeout is the per-request deadline for evaluating the entire
 	// ruleset. Defaults to 5ms. A timeout treats the request as Allow
 	// (i.e. fails open) but logs the error — this is the safer default for
@@ -295,6 +305,11 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 			}
 			return ipOnce
 		}
+		observe := func(o Outcome) {
+			if w.Observe != nil {
+				w.Observe(EvalEvent{Request: r, Outcome: o, Duration: time.Since(start)})
+			}
+		}
 		for _, rule := range rs.rules {
 			matched, err := evalRule(ctx, rule, input)
 			if err != nil {
@@ -302,6 +317,7 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 					w.Logger.Logf("waf: rule %q eval error: %v", rule.id, err)
 				}
 				if w.FailMode == FailClosed {
+					observe(OutcomeError)
 					http.Error(rw, "WAF Error", http.StatusInternalServerError)
 					return
 				}
@@ -329,9 +345,11 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 
 			switch rule.action {
 			case ActionAllow:
+				observe(OutcomeAllow)
 				h.ServeHTTP(rw, r)
 				return
 			case ActionBlock:
+				observe(OutcomeBlock)
 				http.Error(rw, rule.message, rule.status)
 				return
 			case ActionLog:
@@ -339,6 +357,7 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 			}
 		}
 
+		observe(OutcomePass)
 		h.ServeHTTP(rw, r)
 	})
 }
