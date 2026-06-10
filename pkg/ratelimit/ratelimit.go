@@ -20,9 +20,22 @@ func New(strategy Strategy) *RateLimiter {
 
 // RateLimiter middleware
 type RateLimiter struct {
-	Key                  func(r *http.Request) string
-	ExceededHandler      ExceededHandler
-	Strategy             Strategy
+	Key             func(r *http.Request) string
+	ExceededHandler ExceededHandler
+	Strategy        Strategy
+
+	// Observe, if set, is fired on EVERY Take decision with a bounded Event (the Name
+	// below and allowed/limited). Unlike ExceededHandler it does NOT replace the
+	// response — observability is independent of what the client sees, so merely
+	// COUNTING rejections no longer means reimplementing the 429. It runs synchronously
+	// on the request goroutine; keep it cheap. nil disables it. See prom.RateLimit.
+	Observe ObserveFunc
+
+	// Name is an operator-set, bounded label carried on every Event so several rate
+	// limiters are distinguishable in metrics; "" is fine (the prom adapter maps it).
+	// NEVER derived from the client key (unbounded cardinality).
+	Name string
+
 	ReleaseOnWriteHeader bool // release token when write response's header
 	ReleaseOnHijacked    bool // release token when hijacked
 }
@@ -78,9 +91,11 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			key := m.Key(r)
 			if !m.Strategy.Take(key) {
+				m.observe(ResultLimited)
 				m.ExceededHandler(w, r, m.Strategy.After(key))
 				return
 			}
+			m.observe(ResultAllowed)
 			defer m.Strategy.Put(key) // use defer to always put token back when panic
 			h.ServeHTTP(w, r)
 		})
@@ -89,9 +104,11 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := m.Key(r)
 		if !m.Strategy.Take(key) {
+			m.observe(ResultLimited)
 			m.ExceededHandler(w, r, m.Strategy.After(key))
 			return
 		}
+		m.observe(ResultAllowed)
 
 		// Release state lives inside the responseWriter, which already
 		// escapes — avoids allocating a separate closure + bool.
@@ -105,6 +122,15 @@ func (m RateLimiter) ServeHandler(h http.Handler) http.Handler {
 		defer nw.release() // use defer to always put token back when panic
 		h.ServeHTTP(nw, r)
 	})
+}
+
+// observe fires the Observe hook (nil-checked) with a bounded Event carrying the
+// limiter Name and result. It is the single fire point for both ServeHandler
+// branches, so the allowed/limited accounting can never diverge between them.
+func (m RateLimiter) observe(result Result) {
+	if m.Observe != nil {
+		m.Observe(Event{Name: m.Name, Result: result})
+	}
 }
 
 type responseWriter struct {
