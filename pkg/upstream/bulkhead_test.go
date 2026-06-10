@@ -274,7 +274,7 @@ func TestLeastConnBulkhead(t *testing.T) {
 		l.peers[1].active.Store(5) // at cap
 		l.i.Store(math.MaxUint32)  // next pick computes start = Add(1)-1 = MaxUint32
 
-		p, ok := l.pick(3)
+		p, ok, _ := l.pick(3)
 		require.True(t, ok, "the lone under-cap peer must be found despite the cursor wrap")
 		assert.Same(t, &l.peers[2], p, "t2 (the only under-cap peer) is selected, not a false shed")
 	})

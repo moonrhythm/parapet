@@ -37,6 +37,13 @@ type LeastConnLoadBalancer struct {
 
 	// Targets is the set of upstreams to balance across.
 	Targets []*Target
+
+	// OnShed observes a shed (this balancer returned ErrUnavailable before any
+	// round-trip): ShedEmpty for no targets, ShedSaturated when every gate-up target
+	// is at its MaxConcurrent cap, ShedAllDark when the active-HC gate marked the
+	// whole pool down. Nil disables it at zero hot-path cost; see prom.UpstreamShed.
+	// It fires synchronously on the request goroutine, before ErrUnavailable returns.
+	OnShed ShedFunc
 }
 
 // lcPeer holds one target's least-connection state.
@@ -64,12 +71,14 @@ func (l *LeastConnLoadBalancer) RoundTrip(r *http.Request) (*http.Response, erro
 	l.once.Do(l.init)
 	n := len(l.peers)
 	if n == 0 {
+		l.shed(ShedEmpty)
 		return nil, ErrUnavailable
 	}
 
-	p, ok := l.pick(n)
+	p, ok, reason := l.pick(n)
 	if !ok {
-		return nil, ErrUnavailable // every target at its MaxConcurrent cap -> shed (503)
+		l.shed(reason) // saturated (all at cap) or all_dark (probe-dark pool) -> shed (503)
+		return nil, ErrUnavailable
 	}
 	// pick already claimed the slot (active +1) atomically, so the cap is never
 	// exceeded; the matching decrement is the dec below (panic-safe + at body close).
@@ -128,7 +137,7 @@ func (l *LeastConnLoadBalancer) RoundTrip(r *http.Request) (*http.Response, erro
 // candidate set non-monotonic. But total in-flight is bounded by sum(cap) and every
 // losing CAS corresponds to a sibling that made progress (a claim or release), so
 // the system is livelock-free.
-func (l *LeastConnLoadBalancer) pick(n int) (*lcPeer, bool) {
+func (l *LeastConnLoadBalancer) pick(n int) (*lcPeer, bool, ShedReason) {
 	start := l.i.Add(1) - 1
 	// failOpen ignores the active-HC gate for this pick. It engages only when the
 	// gate has marked EVERY target down: a saturated-but-healthy pool sheds (the
@@ -170,10 +179,17 @@ func (l *LeastConnLoadBalancer) pick(n int) (*lcPeer, bool) {
 				failOpen = true
 				continue
 			}
-			return nil, false // saturated, or down-and-saturated -> shed
+			// sawUp here means this (possibly fail-open) scan saw a gate-up peer, all
+			// at cap -> saturated; !sawUp means we reached here via the fail-open
+			// re-scan with the whole pool gate-down -> all_dark. A nil gate makes
+			// sawUp always true, so a no-HC pool always sheds saturated.
+			if sawUp {
+				return nil, false, ShedSaturated
+			}
+			return nil, false, ShedAllDark
 		}
 		if l.claim(best, bestA) {
-			return best, true
+			return best, true, 0 // reason ignored when ok==true
 		}
 		// best filled between the read and the CAS; re-scan (it will now be skipped).
 	}
