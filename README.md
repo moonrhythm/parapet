@@ -531,6 +531,39 @@ misconfigured probe path cannot black-hole a fresh deploy. The probe uses `http`
 for a target on the dynamic multi-scheme `Transport` set `ahc.Scheme` to `"h2c"` or
 `"unix"` (the dedicated transports force their own scheme and ignore it).
 
+## Choosing a reliability primitive
+
+`pkg/upstream` has grown a stack of reliability primitives; reach for one by the
+failure you are defending against. They **compose** — `ActiveHealthCheck` and
+`NewHedgingLoadBalancer` each wrap any balancer — so the owning balancer handles the
+dominant failure mode and the wrappers layer on top.
+
+| Failure mode | Reach for |
+|---|---|
+| Flaky backend, hard 5xx / errors | `NewEjectingLoadBalancer` (keeps routing during a total outage) — or the circuit breaker if you would rather shed |
+| Dead / brownout origin, fail fast and shed | `NewCircuitBreakingLoadBalancer` (rejects an open target with no round-trip) |
+| Tail latency (p99) on a healthy pool | `NewHedgingLoadBalancer` (race a duplicate after `HedgeDelay`) |
+| Gray failure: 200s but one host far slower than peers | `NewLatencyEjectingLoadBalancer` (relative to the pool median) |
+| Overload: a slow backend draining the pool | `Target.MaxConcurrent` on `NewLeastConnLoadBalancer` + a total-request-deadline middleware ([`pkg/timeout`](pkg/timeout)) |
+| Cold deploy / readiness / black-holing a fresh pod | `NewActiveHealthCheck` (probe out-of-band; route only to answering targets) |
+| Uneven backend capacity | `NewWeightedRoundRobinLoadBalancer` (by count) or `NewLeastConnLoadBalancer` (by concurrency) |
+
+**All-down semantics — know this before an incident.** When *every* target is out,
+the primitives diverge, and which one you ran decides whether a correlated outage
+degrades or hard-fails:
+
+| Primitive | When all targets are out |
+|---|---|
+| Round-robin / weighted / least-conn (health) / ejecting / latency-ejecting | **Fail open** — route best-effort (a degraded answer beats none; a broken signal must not black-hole a healthy pool) |
+| `NewLeastConnLoadBalancer` (capacity, every target at `MaxConcurrent`) | **Shed 503** (the bulkhead contract — independent of health) |
+| `NewCircuitBreakingLoadBalancer` (every target open) | **Shed 503** (don't hammer a dead origin) |
+
+`ActiveHealthCheck` never adds an all-down override: when its gate marks every target
+down, each balancer falls back to its **own** policy above. The full failure-mode and
+all-down guide, the composition rules, and the observability hooks
+(`OnRoundTrip` → `prom.Upstream()`, `OnStateChange` → `prom.UpstreamState()`) live in
+the [`pkg/upstream` package doc](pkg/upstream/doc.go).
+
 ## Traffic mirroring (shadowing)
 
 `mirror.New` tees a copy of matched/sampled **requests** to a separate destination
