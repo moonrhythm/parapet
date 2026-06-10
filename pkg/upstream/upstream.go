@@ -21,11 +21,31 @@ var (
 
 // Upstream controls request flow to upstream server via load balancer
 type Upstream struct {
-	Transport     http.RoundTripper
-	ErrorLog      *log.Logger
-	OnRoundTrip   RoundTripFunc // observe each origin round-trip (nil disables); see prom.Upstream
-	Host          string        // override host
-	Path          string        // target prefix path
+	Transport   http.RoundTripper
+	ErrorLog    *log.Logger
+	OnRoundTrip RoundTripFunc // observe each origin round-trip (nil disables); see prom.Upstream
+
+	// RetryPolicy decides whether a request is eligible to be retried after a
+	// transport error. nil uses the default canRetry: an idempotent method
+	// (GET/HEAD/OPTIONS/TRACE) AND a body that is either absent or rewindable
+	// (r.Body is nil/http.NoBody, OR r.GetBody != nil). Set it to widen
+	// eligibility — e.g. to retry an idempotent PUT/DELETE — or to narrow it.
+	//
+	// RETRY AMPLIFICATION — READ BEFORE WIDENING. An eligible request may be sent
+	// to upstreams up to Retries+1 times (one initial attempt plus Retries
+	// re-attempts). If the same Upstream is also fronted by a HedgingLoadBalancer,
+	// each of those attempts can additionally fan out to MaxHedge speculative
+	// copies, so the worst-case origin load multiplies (≈ (Retries+1) × (MaxHedge+1)).
+	// Size Retries (and MaxHedge) for that ceiling, and only mark a request
+	// retryable here when the upstream is genuinely idempotent for it — a retried
+	// non-idempotent request can double-apply a side effect (a duplicate POST, a
+	// second charge). A body-bearing request is only retried when r.GetBody is set
+	// (so each attempt can be rewound to the full body); without GetBody, even an
+	// eligible method is not retried.
+	RetryPolicy func(r *http.Request) bool
+
+	Host          string // override host
+	Path          string // target prefix path
 	Retries       int
 	BackoffFactor time.Duration
 }
@@ -86,18 +106,32 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 				return
 			}
 
-			if canRetry(r) {
+			if m.retryable(r) {
 				ctx := r.Context()
 				retry, _ := ctx.Value(retryContextKey{}).(int)
 				if retry < m.Retries {
 					select {
 					case <-ctx.Done():
 						// client canceled request
+						return
 					case <-time.After(m.BackoffFactor * time.Duration(1<<uint(retry))):
+						// Rewind a body-bearing request before re-attempting: the
+						// previous attempt consumed r.Body, so a fresh copy from
+						// GetBody is required or the retry would send an empty body.
+						// If the rewind fails, give up retrying and fall through to
+						// surface the original transport error below.
+						if r.GetBody != nil {
+							body, gerr := r.GetBody()
+							if gerr != nil {
+								m.logf("upstream: retry rewind: %v", gerr)
+								break
+							}
+							r.Body = body
+						}
 						r = r.WithContext(context.WithValue(ctx, retryContextKey{}, retry+1))
 						p.ServeHTTP(w, r)
+						return
 					}
-					return
 				}
 			}
 
@@ -172,12 +206,31 @@ func singleJoiningSlash(a, b string) string {
 
 type retryContextKey struct{}
 
+// retryable reports whether r may be retried, consulting the operator's
+// RetryPolicy when set and falling back to the default canRetry otherwise.
+func (m *Upstream) retryable(r *http.Request) bool {
+	if m.RetryPolicy != nil {
+		return m.RetryPolicy(r)
+	}
+	return canRetry(r)
+}
+
+// canRetry is the default retry-eligibility rule: an idempotent method whose
+// body is either absent or rewindable. A body-bearing request qualifies only
+// when r.GetBody is set (the stdlib rewind hook), so each re-attempt can be
+// reset to the full body before being sent again — otherwise a retry would
+// transmit a consumed/empty body. The method set (GET/HEAD/OPTIONS/TRACE) is
+// unchanged; retrying an idempotent PUT/DELETE is opt-in via a custom
+// Upstream.RetryPolicy.
 func canRetry(r *http.Request) bool {
 	if !canMethodRetry(r.Method) {
 		return false
 	}
-
-	return r.Body == http.NoBody || r.Body == nil
+	if r.Body == http.NoBody || r.Body == nil {
+		return true
+	}
+	// A body-bearing request is retryable only if it can be rewound.
+	return r.GetBody != nil
 }
 
 func canMethodRetry(method string) bool {
