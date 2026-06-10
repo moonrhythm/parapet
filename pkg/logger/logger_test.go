@@ -104,6 +104,27 @@ func TestLoggerOmitEmpty(t *testing.T) {
 	assert.False(t, hasRealIP)
 }
 
+func TestLoggerEmitsEmptyWhenNotOmitEmpty(t *testing.T) {
+	t.Parallel()
+
+	buf := &bytes.Buffer{}
+	m := &Logger{Writer: buf} // OmitEmpty defaults to false
+	h := m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "127.0.0.1:1"
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	d := decodeLog(t, buf.Bytes())
+	_, hasReferer := d["referer"]
+	_, hasFF := d["forwardedFor"]
+	assert.True(t, hasReferer, "empty referer should be emitted when OmitEmpty is false")
+	assert.True(t, hasFF, "empty forwardedFor should be emitted when OmitEmpty is false")
+}
+
 func TestDisableSkipsRecord(t *testing.T) {
 	t.Parallel()
 

@@ -15,7 +15,13 @@ import (
 
 // Logger middleware
 type Logger struct {
-	Writer    io.Writer
+	Writer io.Writer
+
+	// OmitEmpty, when true, drops fields with empty/zero values (e.g. empty
+	// referer, realIp, forwardedFor) from the emitted log record. The Stdout
+	// and Stderr constructors default this to true; a bare Logger{} (or
+	// &Logger{Writer: x}) defaults it to false, so a zero-value logger emits
+	// empty fields rather than dropping them.
 	OmitEmpty bool
 }
 
@@ -87,7 +93,9 @@ func (m Logger) ServeHandler(h http.Handler) http.Handler {
 				d.Set("durationHeaderHuman", durationHeader.String())
 			}
 
-			d.omitEmpty()
+			if m.OmitEmpty {
+				d.omitEmpty()
+			}
 			json.NewEncoder(m.Writer).Encode(d.data)
 		}()
 		h.ServeHTTP(&nw, r.WithContext(ctx))
