@@ -54,9 +54,10 @@ func SlidingWindowPerHour(rate int) *RateLimiter {
 //
 //nolint:govet // fields grouped by role (state, then config) for readability
 type SlidingWindowStrategy struct {
-	mu      sync.RWMutex
-	storage map[string]*slidingItem
-	once    sync.Once
+	mu             sync.RWMutex
+	storage        map[string]*slidingItem
+	cleanupRunning bool          // janitor liveness; guarded by mu (see evictStale)
+	sweepEvery     time.Duration // test seam: sweep cadence override; <= 0 uses max(2*Size, 1m)
 
 	Max  int           // Max token per window; Max <= 0 admits nothing
 	Size time.Duration // Window size (the trailing interval the limit applies over)
@@ -109,8 +110,6 @@ func weightedCount(prev, curr int, now, size int64) float64 {
 // Max for uniform/front-loaded traffic; see the type doc for the boundary
 // approximation). Max <= 0 admits nothing.
 func (b *SlidingWindowStrategy) Take(key string) bool {
-	b.once.Do(b.cleanupLoop)
-
 	size := b.size()
 	now := time.Now().UnixNano()
 	currentWindow := now / size
@@ -127,6 +126,15 @@ func (b *SlidingWindowStrategy) Take(key string) bool {
 		b.storage[key] = t
 	}
 	t.roll(currentWindow)
+
+	// The map is non-empty from here on, so a janitor must be live. mu is the same
+	// lock the janitor stops itself under (evictStale), so the two transitions
+	// serialize: either this Take sees the stop and restarts the loop, or its key
+	// was inserted before the final sweep and kept the janitor alive.
+	if !b.cleanupRunning {
+		b.cleanupRunning = true
+		go b.cleanupLoop()
+	}
 
 	// Count the request under decision against the limit so the cap holds over the
 	// trailing window, not just within the fixed window.
@@ -217,26 +225,39 @@ func afterAt(maxTokens, prev, curr int, size, now int64) time.Duration {
 }
 
 // cleanupLoop evicts keys idle for >= 2 windows (their curr == prev == 0 after roll,
-// so they contribute nothing). Started once via sync.Once and lives for the
-// process lifetime — same shape as LeakyBucketStrategy.cleanupLoop.
+// so they contribute nothing). It runs as its own goroutine, started by Take, and
+// EXITS when a sweep leaves the map empty rather than living for the process
+// lifetime: a discarded strategy (hot-reloaded config, per-tenant limiters built and
+// dropped at runtime) drains within ~2 sweeps and becomes fully collectable instead
+// of leaking a goroutine. The next Take restarts it on the idle->active transition —
+// same shape as LeakyBucketStrategy.cleanupLoop.
 func (b *SlidingWindowStrategy) cleanupLoop() {
-	maxDuration := 2 * time.Duration(b.size())
-	if maxDuration < time.Minute {
-		maxDuration = time.Minute
+	every := b.sweepEvery
+	if every <= 0 {
+		every = 2 * time.Duration(b.size())
+		if every < time.Minute {
+			every = time.Minute
+		}
 	}
 
-	go func() {
-		for {
-			time.Sleep(maxDuration)
-			b.evictStale()
+	for {
+		time.Sleep(every)
+		if b.evictStale() {
+			return
 		}
-	}()
+	}
 }
 
 // evictStale deletes keys >= 2 windows old (window < currentWindow-1): roll has
 // already zeroed both their counts, so deleting them loses nothing. A key one window
 // old still has a live prev and survives, deleted on a later sweep.
-func (b *SlidingWindowStrategy) evictStale() {
+//
+// It reports whether the sweep left the map empty, having then ALSO marked the
+// janitor stopped — both inside the one mu critical section, so a concurrent Take
+// cannot observe a non-empty map with no janitor: it either sees cleanupRunning ==
+// false and restarts the loop, or its key landed before the sweep and kept the map
+// non-empty.
+func (b *SlidingWindowStrategy) evictStale() (stopped bool) {
 	deleteBefore := time.Now().UnixNano()/b.size() - 1
 
 	b.mu.Lock()
@@ -247,4 +268,9 @@ func (b *SlidingWindowStrategy) evictStale() {
 			delete(b.storage, k)
 		}
 	}
+	if len(b.storage) > 0 {
+		return false
+	}
+	b.cleanupRunning = false
+	return true
 }
