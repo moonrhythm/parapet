@@ -147,6 +147,24 @@ type Options struct {
 	// the leader always streams in lockstep and holds the fill lock until that stream
 	// and the commit finish (see LockTimeout).
 	DecoupleFill bool
+
+	// CacheChunked, when true, lets a GET response that carries NO Content-Length
+	// (a chunked / streamed body — e.g. an on-the-fly-compressed asset) still be
+	// cached: the body is streamed to storage as usual and, since there is no
+	// declared length to match, completeness is inferred from the upstream handler
+	// returning normally. The MaxFileSize cap is enforced mid-stream (an oversize
+	// body stops caching and is served in full, uncached), and a Server-Sent-Events
+	// response (Content-Type text/event-stream) is never buffered.
+	//
+	// SAFETY: with no Content-Length the cache cannot verify the body is complete by
+	// byte count, so it relies on a TRUNCATED upstream surfacing as a panic /
+	// http.ErrAbortHandler (httputil.ReverseProxy does this for inbound requests),
+	// which unwinds through the leader's deferred cleanup and discards the entry — so
+	// only a cleanly-finished body is committed. Enable this only behind a forwarder
+	// that aborts (rather than silently returns) on a mid-body error; a handler that
+	// swallows the error and returns normally could otherwise cache a partial body.
+	// When false (default), a chunked GET passes through uncached as before.
+	CacheChunked bool
 }
 
 // OverrideMode selects how far an Override reaches over the origin's
@@ -204,19 +222,20 @@ type Override struct {
 // Cache is the HTTP response-cache middleware. It implements parapet.Middleware
 // (ServeHandler). Construct with New, giving it a Storage backend.
 type Cache struct {
-	storage          Storage
-	invalidatedAfter func(r *http.Request, m Meta) int64
-	cacheable        func(r *http.Request) bool
-	override         func(r *http.Request, status int, header http.Header) *Override
-	onResult         ResultFunc
-	primaryVary      map[string][]string  // primaryHex -> Vary header names learned from a stored response
-	locks            map[string]*fillLock // variantHex -> in-flight fill
+	storage           Storage
+	invalidatedAfter  func(r *http.Request, m Meta) int64
+	cacheable         func(r *http.Request) bool
+	override          func(r *http.Request, status int, header http.Header) *Override
+	onResult          ResultFunc
+	primaryVary       map[string][]string  // primaryHex -> Vary header names learned from a stored response
+	locks             map[string]*fillLock // variantHex -> in-flight fill
 	maxFileSize       int64
 	lockTimeout       time.Duration
 	revalidateTimeout time.Duration
 	defaultSWR        time.Duration // Options.DefaultStaleWhileRevalidate, clamped
 	defaultSIE        time.Duration // Options.DefaultStaleIfError, clamped
 	decoupleFill      bool
+	cacheChunked      bool
 
 	pvMu sync.RWMutex
 
@@ -259,6 +278,7 @@ func New(storage Storage, opts Options) *Cache {
 		override:          opts.Override,
 		onResult:          opts.OnResult,
 		decoupleFill:      opts.DecoupleFill,
+		cacheChunked:      opts.CacheChunked,
 		primaryVary:       map[string][]string{},
 		locks:             map[string]*fillLock{},
 	}
@@ -550,6 +570,12 @@ func writeStored(w http.ResponseWriter, r *http.Request, m Meta, body []byte, ta
 	}
 	h.Set("Age", strconv.FormatInt(servedAgeSeconds(m, time.Now()), 10))
 	h.Set("X-Cache", tag)
+	// A chunked-buffered entry was stored without a Content-Length; serve the
+	// definitive length now that the whole body is in hand, so the served response
+	// is itself a well-formed cacheable one (and not re-chunked downstream).
+	if h.Get("Content-Length") == "" && r.Method != http.MethodHead && m.Status != http.StatusNoContent {
+		h.Set("Content-Length", strconv.Itoa(len(body)))
+	}
 	w.WriteHeader(m.Status)
 	if r.Method == http.MethodHead || m.Status == http.StatusNoContent {
 		return

@@ -61,7 +61,7 @@ func TestDecideForced(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			d := decideForced(http.MethodGet, tc.status, tc.h, tc.auth, maxFile, now, &Override{TTL: time.Hour, Mode: tc.mode})
+			d := decideForced(http.MethodGet, tc.status, tc.h, tc.auth, maxFile, false, now, &Override{TTL: time.Hour, Mode: tc.mode})
 			assert.Equal(t, tc.wantCacheable, d.cacheable)
 			if tc.wantCacheable && tc.wantTTL > 0 {
 				assert.Equal(t, now.Add(tc.wantTTL), d.freshUntil)
@@ -70,7 +70,7 @@ func TestDecideForced(t *testing.T) {
 	}
 
 	t.Run("forces the RFC 5861 windows", func(t *testing.T) {
-		d := decideForced(http.MethodGet, 200, hdr(), false, maxFile, now,
+		d := decideForced(http.MethodGet, 200, hdr(), false, maxFile, false, now,
 			&Override{TTL: time.Hour, StaleWhileRevalidate: 30 * time.Second, StaleIfError: time.Hour})
 		require.True(t, d.cacheable)
 		assert.Equal(t, 30*time.Second, d.staleWhileRevalidate)
@@ -79,19 +79,19 @@ func TestDecideForced(t *testing.T) {
 	})
 
 	t.Run("clamps an absurd TTL", func(t *testing.T) {
-		d := decideForced(http.MethodGet, 200, hdr(), false, maxFile, now, &Override{TTL: 100 * 365 * 24 * time.Hour})
+		d := decideForced(http.MethodGet, 200, hdr(), false, maxFile, false, now, &Override{TTL: 100 * 365 * 24 * time.Hour})
 		require.True(t, d.cacheable)
 		assert.Equal(t, now.Add(maxTTL), d.freshUntil)
 	})
 
 	t.Run("HEAD needs no Content-Length", func(t *testing.T) {
 		h := http.Header{} // no Content-Length
-		d := decideForced(http.MethodHead, 200, h, false, maxFile, now, &Override{TTL: time.Hour})
+		d := decideForced(http.MethodHead, 200, h, false, maxFile, false, now, &Override{TTL: time.Hour})
 		assert.True(t, d.cacheable)
 	})
 
 	t.Run("conservative respects must-revalidate over forced windows", func(t *testing.T) {
-		d := decideForced(http.MethodGet, 200, hdr("Cache-Control", "must-revalidate, max-age=60"), false, maxFile, now,
+		d := decideForced(http.MethodGet, 200, hdr("Cache-Control", "must-revalidate, max-age=60"), false, maxFile, false, now,
 			&Override{TTL: time.Hour, StaleWhileRevalidate: 30 * time.Minute, Mode: OverrideConservative})
 		require.True(t, d.cacheable)
 		assert.True(t, d.noStale)
@@ -100,7 +100,7 @@ func TestDecideForced(t *testing.T) {
 	})
 
 	t.Run("balanced forces windows despite must-revalidate", func(t *testing.T) {
-		d := decideForced(http.MethodGet, 200, hdr("Cache-Control", "must-revalidate, max-age=60"), false, maxFile, now,
+		d := decideForced(http.MethodGet, 200, hdr("Cache-Control", "must-revalidate, max-age=60"), false, maxFile, false, now,
 			&Override{TTL: time.Hour, StaleWhileRevalidate: 30 * time.Minute, Mode: OverrideBalanced})
 		require.True(t, d.cacheable)
 		assert.False(t, d.noStale)
@@ -151,7 +151,9 @@ func TestCache_Override_BalancedIgnoresRequestCookie(t *testing.T) {
 func TestCache_Override_AggressiveCachesAcrossUsers(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return &Override{TTL: time.Hour, Mode: OverrideAggressive} },
+		Override: func(_ *http.Request, _ int, _ http.Header) *Override {
+			return &Override{TTL: time.Hour, Mode: OverrideAggressive}
+		},
 	})
 	o := origin(originSpec{body: []byte("user-data")}, new(int32))
 
@@ -268,7 +270,9 @@ func TestCache_Override_NilHonorsOrigin(t *testing.T) {
 func TestCache_Override_ForcedStaleIfError(t *testing.T) {
 	c := New(NewMemory(1<<20), Options{
 		MaxFileSize: 1024,
-		Override:    func(_ *http.Request, _ int, _ http.Header) *Override { return &Override{TTL: time.Hour, StaleIfError: time.Hour} },
+		Override: func(_ *http.Request, _ int, _ http.Header) *Override {
+			return &Override{TTL: time.Hour, StaleIfError: time.Hour}
+		},
 	})
 	do(c, origin(originSpec{body: []byte("old")}, new(int32)), "GET", "/x", nil) // fill (forced)
 
