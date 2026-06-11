@@ -115,7 +115,11 @@ func (b *FixedWindowStrategy) After(key string) time.Duration {
 		return 0
 	}
 
-	// no more token left
-	nextWindow := now.Truncate(b.Size).Add(b.Size)
-	return nextWindow.Sub(now)
+	// no more token left; the reset must be computed on the same Unix-epoch grid
+	// Take buckets on (UnixNano()/Size). time.Truncate rounds on the year-1 grid,
+	// which only coincides with the epoch grid when Size divides the year1->epoch
+	// offset (true for 1s/1m/1h, not arbitrary sizes) — on any other Size it can
+	// report a wait short enough to retry into another denial.
+	nextWindow := (currentWindow + 1) * int64(b.Size)
+	return time.Duration(nextWindow - now.UnixNano())
 }

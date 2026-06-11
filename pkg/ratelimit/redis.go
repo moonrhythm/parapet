@@ -157,11 +157,10 @@ func (b *RedisFixedWindowStrategy) Put(string) {}
 // is anchored to the SAME integer epoch (now/Size) folded into the Redis key, so the
 // returned duration is exactly the time to the end of the current window's key.
 //
-// This intentionally DIVERGES from FixedWindowStrategy.After, which uses
-// time.Truncate (anchored to time.Time's year-1 zero) and is therefore only correct
-// for windows that divide an hour; epoch anchoring is correct for ANY Size. The
-// middleware only calls After after a rejecting Take, so it always reflects a window
-// the key is currently in.
+// This is the same epoch grid FixedWindowStrategy.{Take,After} use, and it is
+// correct for ANY Size (unlike time.Truncate's year-1 anchoring, which only matches
+// for sizes that divide the year1->epoch offset). The middleware only calls After
+// after a rejecting Take, so it always reflects a window the key is currently in.
 func (b *RedisFixedWindowStrategy) After(string) time.Duration {
 	b.once.Do(b.init) // resolve b.size even if After races ahead of the first Take
 	now := time.Now()
