@@ -68,7 +68,7 @@ type decision struct {
 // commits a body only once written bytes == Content-Length, guaranteeing a
 // truncated response is never stored. A chunked (no Content-Length) GET passes
 // through uncached. HEAD has no body and is unaffected.
-func decide(method string, status int, h http.Header, reqAuthorized bool, maxFileSize int64, now time.Time) decision {
+func decide(method string, status int, h http.Header, reqAuthorized bool, maxFileSize int64, cacheChunked bool, now time.Time) decision {
 	no := decision{}
 	vary, ok := storeRefusals(status, h)
 	if !ok {
@@ -90,7 +90,7 @@ func decide(method string, status int, h http.Header, reqAuthorized bool, maxFil
 	if ttl <= 0 {
 		return no // honor-origin: no explicit freshness -> not cached
 	}
-	if !fitsCap(method, h, maxFileSize) {
+	if !fitsCap(method, h, maxFileSize, cacheChunked) {
 		return no
 	}
 	// Clamp absurd freshness so now+ttl stays within time.UnixNano's range.
@@ -108,7 +108,7 @@ func decide(method string, status int, h http.Header, reqAuthorized bool, maxFil
 // refusals (no-cache, no-store/private, the Authorization gate) still apply and
 // whether the forced TTL overrides the origin's freshness. The caller guarantees
 // ov.TTL > 0.
-func decideForced(method string, status int, h http.Header, reqAuthorized bool, maxFileSize int64, now time.Time, ov *Override) decision {
+func decideForced(method string, status int, h http.Header, reqAuthorized bool, maxFileSize int64, cacheChunked bool, now time.Time, ov *Override) decision {
 	no := decision{}
 	vary, ok := storeRefusals(status, h)
 	if !ok {
@@ -147,7 +147,7 @@ func decideForced(method string, status int, h http.Header, reqAuthorized bool, 
 	if ttl <= 0 {
 		return no
 	}
-	if !fitsCap(method, h, maxFileSize) {
+	if !fitsCap(method, h, maxFileSize, cacheChunked) {
 		return no
 	}
 	if ttl > maxTTL {
@@ -202,16 +202,30 @@ func sharedOptIn(cc cacheControl) bool {
 	return cc.public || cc.hasSMax || cc.mustRevalidate
 }
 
-// fitsCap reports whether a GET response's Content-Length is present and within
-// the per-object cap (HEAD has no body and always fits). A chunked GET (no
-// Content-Length) is not cacheable: the middleware commits only when written
-// bytes match Content-Length, so a truncated response is never stored.
-func fitsCap(method string, h http.Header, maxFileSize int64) bool {
+// fitsCap reports whether a GET response is within the per-object cap (HEAD has
+// no body and always fits). With a Content-Length, it must be present and within
+// the cap. Without one (a chunked / streamed GET), the response is cacheable only
+// when cacheChunked is enabled — and never for a Server-Sent-Events stream; the
+// real cap is then enforced mid-stream by the teeWriter, and completeness comes
+// from the upstream handler finishing cleanly (see teeWriter.finish). When
+// cacheChunked is off, a no-Content-Length GET is not cacheable, as before.
+func fitsCap(method string, h http.Header, maxFileSize int64, cacheChunked bool) bool {
 	if method != http.MethodGet {
 		return true
 	}
 	cl, ok := contentLength(h)
-	return ok && cl >= 0 && cl <= maxFileSize
+	if !ok {
+		return cacheChunked && !isEventStream(h)
+	}
+	return cl >= 0 && cl <= maxFileSize
+}
+
+// isEventStream reports a Server-Sent-Events response (Content-Type
+// text/event-stream, with or without parameters), which is an open-ended stream
+// and must never be buffered for caching.
+func isEventStream(h http.Header) bool {
+	ct := strings.ToLower(strings.TrimSpace(h.Get("Content-Type")))
+	return ct == "text/event-stream" || strings.HasPrefix(ct, "text/event-stream;")
 }
 
 // staleWindows derives the RFC 5861 stale-serving windows from the response

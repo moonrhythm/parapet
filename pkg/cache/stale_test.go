@@ -421,28 +421,28 @@ func TestPolicy_StaleWindows(t *testing.T) {
 	}
 
 	t.Run("parsed", func(t *testing.T) {
-		d := decide("GET", 200, h("max-age=60, stale-while-revalidate=120, stale-if-error=3600"), false, 1<<20, now)
+		d := decide("GET", 200, h("max-age=60, stale-while-revalidate=120, stale-if-error=3600"), false, 1<<20, false, now)
 		require.True(t, d.cacheable)
 		assert.Equal(t, 120*time.Second, d.staleWhileRevalidate)
 		assert.Equal(t, 3600*time.Second, d.staleIfError)
 	})
 
 	t.Run("must-revalidate suppresses both", func(t *testing.T) {
-		d := decide("GET", 200, h("max-age=60, must-revalidate, stale-while-revalidate=120, stale-if-error=3600"), false, 1<<20, now)
+		d := decide("GET", 200, h("max-age=60, must-revalidate, stale-while-revalidate=120, stale-if-error=3600"), false, 1<<20, false, now)
 		require.True(t, d.cacheable)
 		assert.Zero(t, d.staleWhileRevalidate)
 		assert.Zero(t, d.staleIfError)
 	})
 
 	t.Run("proxy-revalidate suppresses both", func(t *testing.T) {
-		d := decide("GET", 200, h("s-maxage=60, proxy-revalidate, stale-while-revalidate=120"), false, 1<<20, now)
+		d := decide("GET", 200, h("s-maxage=60, proxy-revalidate, stale-while-revalidate=120"), false, 1<<20, false, now)
 		require.True(t, d.cacheable)
 		assert.Zero(t, d.staleWhileRevalidate)
 		assert.Zero(t, d.staleIfError)
 	})
 
 	t.Run("absent", func(t *testing.T) {
-		d := decide("GET", 200, h("max-age=60"), false, 1<<20, now)
+		d := decide("GET", 200, h("max-age=60"), false, 1<<20, false, now)
 		require.True(t, d.cacheable)
 		assert.Zero(t, d.staleWhileRevalidate)
 		assert.Zero(t, d.staleIfError)

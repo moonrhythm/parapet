@@ -67,9 +67,9 @@ func (tw *teeWriter) WriteHeader(code int) {
 	now := time.Now()
 	var dec decision
 	if ov := tw.c.overrideFor(tw.r, code, h); ov != nil {
-		dec = decideForced(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, now, ov)
+		dec = decideForced(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, tw.c.cacheChunked, now, ov)
 	} else {
-		dec = decide(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, now)
+		dec = decide(tw.method, code, h, reqAuthorized, tw.c.maxFileSize, tw.c.cacheChunked, now)
 	}
 	if dec.cacheable {
 		vary := append([]string(nil), dec.vary...)
@@ -109,7 +109,13 @@ func (tw *teeWriter) WriteHeader(code int) {
 	// slow client can't hold the lock from those followers. With no follower waiting
 	// there's nothing to isolate, so the leader streams in lockstep and pays no
 	// added latency. A non-cacheable response (ew == nil) always streams in lockstep.
-	if tw.ew != nil && tw.c.decoupleFill && tw.lock != nil && tw.lock.waiters.Load() > 0 {
+	//
+	// A chunked (no Content-Length) entry never decouples: its leaderBuf is capped
+	// at maxFileSize but we don't know the body fits until the stream ends, so an
+	// over-cap body would serve the leader a truncated response. Streaming it in
+	// lockstep instead always gives the leader exactly what the origin produced; the
+	// storage copy is still capped+aborted independently.
+	if tw.ew != nil && tw.hasCL && tw.c.decoupleFill && tw.lock != nil && tw.lock.waiters.Load() > 0 {
 		tw.deferredClient = true
 		return
 	}
@@ -181,7 +187,15 @@ func (tw *teeWriter) finish() {
 	if tw.ew == nil {
 		return
 	}
-	complete := tw.method == http.MethodHead || (tw.hasCL && tw.written == tw.contentLen)
+	// Completeness: HEAD has no body; a Content-Length body must match exactly (a
+	// truncated one wrote fewer bytes). A chunked body (no Content-Length, only
+	// reached here when CacheChunked opened the writer) has no length to match —
+	// finish runs only when the upstream handler returned NORMALLY (a truncated
+	// upstream panics http.ErrAbortHandler, which unwinds through fill's deferred
+	// cleanup before finish), so reaching here means the stream ended cleanly.
+	complete := tw.method == http.MethodHead ||
+		(tw.hasCL && tw.written == tw.contentLen) ||
+		(!tw.hasCL && tw.c.cacheChunked)
 	if !complete {
 		tw.abort()
 		return
