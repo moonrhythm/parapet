@@ -20,8 +20,8 @@ import (
 // Unlike a Rule it carries no action/status/priority: it answers one question,
 // "does this request match", and the caller decides what to do with the answer.
 type Predicate struct {
+	prg         cel.Program // interface (2 ptr words); first to keep the GC scan span minimal (fieldalignment)
 	expression  string
-	prg         cel.Program
 	evalTimeout time.Duration
 }
 
