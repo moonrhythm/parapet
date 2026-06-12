@@ -362,16 +362,22 @@ func (w *WAF) ServeHandler(h http.Handler) http.Handler {
 	})
 }
 
-// evalRule runs a single CEL program with panic recovery. Panics inside CEL
-// are not expected but a defensive recover ensures one buggy custom function
-// can never take down the proxy.
+// evalRule runs a single rule's CEL program with panic recovery.
 func evalRule(ctx context.Context, rule *compiledRule, input map[string]any) (matched bool, err error) {
+	return evalProgram(ctx, rule.prg, input)
+}
+
+// evalProgram runs a compiled CEL program against input and coerces the result
+// to bool, with panic recovery. Panics inside CEL are not expected but a
+// defensive recover ensures one buggy custom function can never take down the
+// proxy. Shared by WAF rules (evalRule) and the standalone Predicate.
+func evalProgram(ctx context.Context, prg cel.Program, input map[string]any) (matched bool, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("panic: %v", rec)
 		}
 	}()
-	out, _, evErr := rule.prg.ContextEval(ctx, input)
+	out, _, evErr := prg.ContextEval(ctx, input)
 	if evErr != nil {
 		return false, evErr
 	}
