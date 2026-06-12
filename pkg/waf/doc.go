@@ -64,6 +64,23 @@
 // thread-safe cel.Program. Evaluation uses ContextEval with a CostLimit and
 // per-request deadline (WAF.EvalTimeout) to keep the request path bounded.
 //
+// # Reusing the CEL surface outside the firewall (Predicate)
+//
+// The same `request` model and custom functions are available standalone via
+// Predicate, a compiled boolean expression with no action/status — it answers
+// only "does this request match". This lets other middleware reuse the WAF's
+// CEL surface without duplicating (or drifting from) the environment; the
+// canonical consumer is rate limiting, which gates a limit on a Predicate:
+//
+//	p, _ := waf.NewPredicate(`request.method == "POST" && request.path.startsWith("/api/")`)
+//	in := waf.NewInput(r, "", country, asn) // one snapshot, reusable across predicates
+//	match, err := p.Eval(r.Context(), in)
+//
+// Build a Predicate once (NewPredicate validates the bool result type and bounds
+// it with the same cost limit as a rule); evaluation is concurrency-safe. Eval
+// returns an error on timeout/cost/type failure, leaving the fail-open vs
+// fail-closed decision to the caller.
+//
 // # Security notes
 //
 //   - Cost limit is enforced (default 1_000_000 units) to prevent runaway rules.
