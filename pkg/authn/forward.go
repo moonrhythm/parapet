@@ -35,6 +35,19 @@ func (m ForwardAuthenticator) ServeHandler(h http.Handler) http.Handler {
 	if client == nil {
 		client = http.DefaultClient
 	}
+	// Forward-auth uses the auth server's response status as the verdict
+	// (validStatusCode allows 2xx; Forbidden relays everything else), so the
+	// client must NOT follow redirects: a "302 -> login" followed to its eventual
+	// 200 would silently read as "allow" and bypass authentication entirely.
+	// Enforce no-follow on a shallow copy so a caller-supplied client (and
+	// http.DefaultClient) is never mutated.
+	if client.CheckRedirect == nil {
+		c := *client
+		c.CheckRedirect = func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+		client = &c
+	}
 	var urlStr string
 	if m.URL != nil {
 		urlStr = m.URL.String()

@@ -112,3 +112,40 @@ func TestForward(t *testing.T) {
 		assert.Equal(t, 503, w.Code)
 	})
 }
+
+// TestForwardDoesNotFollowRedirect guards against a fail-open: an auth server
+// that denies by redirecting to a login page (the access.deploys.app gate
+// pattern) must have its 3xx relayed to the client, never followed. A
+// redirect-following client would chase "302 -> login" to its 200 and read it
+// as a 2xx "allow", bypassing authentication for everyone. The default
+// http.Client follows redirects, so Forward(authURL) (nil Client) must still
+// not follow.
+func TestForwardDoesNotFollowRedirect(t *testing.T) {
+	t.Parallel()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("login page"))
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusFound)
+	}))
+	defer srv.Close()
+
+	authURL, err := url.Parse(srv.URL + "/verify")
+	require.NoError(t, err)
+
+	m := Forward(authURL) // nil Client -> http.DefaultClient (which follows redirects)
+
+	r := httptest.NewRequest("GET", "/", nil)
+	w := httptest.NewRecorder()
+	called := false
+	m.ServeHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+	})).ServeHTTP(w, r)
+
+	assert.False(t, called, "upstream must not be reached: a redirect-to-login is a deny, not an allow")
+	assert.Equal(t, http.StatusFound, w.Code, "the auth server's 302 must be relayed verbatim")
+	assert.Equal(t, "/login", w.Header().Get("Location"))
+}
