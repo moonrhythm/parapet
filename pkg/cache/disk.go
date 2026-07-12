@@ -55,6 +55,15 @@ func NewDisk(dir string, maxSize int64) (*DiskStorage, error) {
 	return s, nil
 }
 
+// Size returns the current body-byte total tracked by the LRU (the eviction
+// weight). Safe for concurrent use; O(1). Intended for metrics/observability —
+// not the serving path. The value may lag the on-disk footprint during the
+// background startup scan and while in-flight temp writes are not yet committed.
+func (s *DiskStorage) Size() int64 { return s.lru.size() }
+
+// MaxSize returns the configured body-byte cap passed to NewDisk. O(1).
+func (s *DiskStorage) MaxSize() int64 { return s.lru.maxSize() }
+
 func (s *DiskStorage) shardDir(key string) string { return filepath.Join(s.dir, key[:2]) }
 func (s *DiskStorage) bodyPath(key string) string {
 	return filepath.Join(s.shardDir(key), key+".body")

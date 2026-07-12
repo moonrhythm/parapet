@@ -136,3 +136,34 @@ func TestDisk_ScanSkipsSizeMismatch(t *testing.T) {
 	b.scan(time.Now())
 	assert.EqualValues(t, 0, b.lru.size(), "size-mismatched entry is not admitted to the byte cap")
 }
+
+func TestDiskStorageSize(t *testing.T) {
+	dir := t.TempDir()
+	s, err := NewDisk(dir, 1<<20)
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, s.Size())
+	assert.EqualValues(t, 1<<20, s.MaxSize())
+
+	const key = "aabbccddeeff00112233445566778899"
+	storePut(t, s, key, Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 3}, []byte("xyz"))
+	assert.EqualValues(t, 3, s.Size())
+
+	s.Delete(key)
+	assert.EqualValues(t, 0, s.Size(), "Delete drops the entry's weight")
+}
+
+func TestDiskStorageSizeReseedAfterRestart(t *testing.T) {
+	dir := t.TempDir()
+	a, err := NewDisk(dir, 1<<20)
+	require.NoError(t, err)
+	const key = "11223344556677889900aabbccddeeff"
+	storePut(t, a, key, Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 4}, []byte("abcd"))
+	assert.EqualValues(t, 4, a.Size())
+
+	// Run the scan synchronously (like the other scan tests) so the assertion is
+	// deterministic — NewDisk's background goroutine would race a pre-scan read.
+	// Goroutine-launch coverage lives in the survives-restart Eventually test.
+	b := &DiskStorage{dir: dir, lru: newLRU(1 << 20)}
+	b.scan(time.Now())
+	assert.EqualValues(t, 4, b.Size(), "scan re-seeds Size to the surviving entry's body weight")
+}

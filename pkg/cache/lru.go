@@ -94,9 +94,13 @@ func (l *lru) remove(key string) {
 	}
 }
 
-// size reports the current tracked total (for tests/observability).
+// size reports the current tracked total (for tests / Size observability).
 func (l *lru) size() int64 {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.cur
 }
+
+// maxSize reports the configured byte cap. max is set once in newLRU and never
+// mutated, so no lock is required.
+func (l *lru) maxSize() int64 { return l.max }
