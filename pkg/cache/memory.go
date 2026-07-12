@@ -28,6 +28,14 @@ func NewMemory(maxSize int64) *MemoryStorage {
 	return &MemoryStorage{m: map[string]memEntry{}, lru: newLRU(maxSize)}
 }
 
+// Size returns the current body-byte total tracked by the LRU (the eviction
+// weight). Safe for concurrent use; O(1). Intended for metrics/observability —
+// not the serving path.
+func (s *MemoryStorage) Size() int64 { return s.lru.size() }
+
+// MaxSize returns the configured body-byte cap passed to NewMemory. O(1).
+func (s *MemoryStorage) MaxSize() int64 { return s.lru.maxSize() }
+
 // Get returns the entry under key, touching its LRU recency on a hit. The Meta is
 // deep-copied so a caller (e.g. the InvalidatedAfter hook) can't mutate the live
 // stored entry; the body is returned by reference and must not be mutated (see

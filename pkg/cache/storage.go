@@ -12,7 +12,10 @@
 // lost on restart) and a disk-backed one ([NewDisk], survives restarts, streams
 // bodies to disk so it isn't bounded by RSS). Both bound their total size with
 // LRU eviction and a per-object cap. Plug either (or your own [Storage]) into
-// [New].
+// [New]. Both concrete backends expose O(1) [DiskStorage.Size]/[MemoryStorage.Size]
+// and MaxSize for metrics/observability (LRU body-byte weight vs configured cap);
+// Size is intentionally not on the [Storage] interface so custom backends stay free
+// of an observability obligation.
 //
 //	store, _ := cache.NewDisk("/var/cache/app", 1<<30) // 1 GiB on disk
 //	m := cache.New(store, cache.Options{MaxFileSize: 8 << 20})

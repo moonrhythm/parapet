@@ -94,3 +94,18 @@ func TestMemory_AbortAfterCommitIsNoop(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "abc", string(body))
 }
+
+func TestMemoryStorageSize(t *testing.T) {
+	s := NewMemory(1 << 20)
+	assert.EqualValues(t, 0, s.Size())
+	assert.EqualValues(t, 1<<20, s.MaxSize())
+
+	storePut(t, s, "k1", Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 5}, []byte("hello"))
+	assert.EqualValues(t, 5, s.Size())
+
+	storePut(t, s, "k2", Meta{Status: 200, Header: http.Header{}, FreshUntil: time.Now().Add(time.Hour).UnixNano(), Size: 7}, []byte("world!!"))
+	assert.EqualValues(t, 5+7, s.Size())
+
+	s.Delete("k1")
+	assert.EqualValues(t, 7, s.Size(), "Delete drops the entry's weight")
+}
