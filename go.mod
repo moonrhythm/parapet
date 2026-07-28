@@ -8,7 +8,7 @@ require (
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/google/brotli/go/cbrotli v0.0.0-20240919160234-350100a5bb9d
-	github.com/google/cel-go v0.28.1
+	github.com/google/cel-go v0.29.0
 	github.com/kavu/go_reuseport v1.5.0
 	github.com/klauspost/compress v1.18.5
 	github.com/prometheus/client_golang v1.23.2
