@@ -1,7 +1,6 @@
 # parapet
 
 ![Build Status](https://github.com/moonrhythm/parapet/actions/workflows/test.yaml/badge.svg?branch=master)
-[![Go Report Card](https://goreportcard.com/badge/github.com/moonrhythm/parapet)](https://goreportcard.com/report/github.com/moonrhythm/parapet)
 [![GoDoc](https://godoc.org/github.com/moonrhythm/parapet?status.svg)](https://godoc.org/github.com/moonrhythm/parapet)
 
 A composable reverse proxy framework for Go. Parapet is a library, not a binary: you build your edge or backend by importing the pieces you need and chaining them together with `Use`.
