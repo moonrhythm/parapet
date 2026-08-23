@@ -280,7 +280,7 @@ func (m *Mirror) dispatch(r *http.Request, body []byte) {
 
 	c := r.Clone(ctx) // deep-copies Header/URL/Trailer/Form; mirror mutations are isolated
 	c.RequestURI = "" // must be empty on a client request (else RoundTrip panics)
-	c.RemoteAddr = "" // don't forward, like upstream.go's r.RemoteAddr = ""
+	c.RemoteAddr = "" // canary does not inherit the client's address
 	c.Close = false
 	c.TransferEncoding = nil // else inbound chunked framing overrides our fixed Content-Length
 	for k := range c.Header {

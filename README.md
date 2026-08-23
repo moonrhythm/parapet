@@ -12,7 +12,7 @@ A composable reverse proxy framework for Go. Parapet is a library, not a binary:
 go get github.com/moonrhythm/parapet
 ```
 
-Requires Go 1.25 or later.
+Requires Go 1.26 or later.
 
 ## Concepts
 
@@ -246,7 +246,7 @@ WebSocket upgrades, and bodies below `MinLength`. Level variants exist:
 
 ## WAF with CEL rules
 
-The [`waf`](pkg/waf) package runs [CEL](https://github.com/google/cel-go) expressions against incoming requests. Rules compile inside `SetRules`, so the hot path never parses or type-checks, and rules can be swapped atomically at runtime.
+The [`waf`](pkg/waf) package runs [CEL](https://github.com/cel-expr/cel-go) expressions against incoming requests. Rules compile inside `SetRules`, so the hot path never parses or type-checks, and rules can be swapped atomically at runtime.
 
 ```go
 import (
