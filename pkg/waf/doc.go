@@ -1,7 +1,7 @@
 // Package waf provides a Web Application Firewall middleware for parapet.
 //
 // Rules are written in the Common Expression Language (CEL,
-// https://github.com/google/cel-go) which allows safe, sandboxed expressions
+// https://github.com/cel-expr/cel-go) which allows safe, sandboxed expressions
 // to be evaluated against incoming HTTP requests without restarting the
 // process.
 //

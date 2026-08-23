@@ -133,6 +133,54 @@ func TestUpstream(t *testing.T) {
 		assert.True(t, called)
 	})
 
+	t.Run("Preserves forwarded headers", func(t *testing.T) {
+		// httputil.ReverseProxy.Rewrite strips X-Forwarded-* / Forwarded from
+		// the outbound request; the proxy layer already applied the trust
+		// policy, so those values must still reach the origin.
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("X-Forwarded-For", "203.0.113.1")
+		r.Header.Set("X-Forwarded-Proto", "https")
+		r.Header.Set("X-Forwarded-Host", "app.example.com")
+		r.Header.Set("Forwarded", "for=203.0.113.1")
+		w := httptest.NewRecorder()
+
+		called := false
+		New(&mockTransport{
+			roundTripFunc: func(r *http.Request) (*http.Response, error) {
+				called = true
+				assert.Equal(t, "203.0.113.1", r.Header.Get("X-Forwarded-For"))
+				assert.Equal(t, "https", r.Header.Get("X-Forwarded-Proto"))
+				assert.Equal(t, "app.example.com", r.Header.Get("X-Forwarded-Host"))
+				assert.Equal(t, "for=203.0.113.1", r.Header.Get("Forwarded"))
+				return httptest.NewRecorder().Result(), nil
+			},
+		}).ServeHandler(nil).ServeHTTP(w, r)
+		assert.True(t, called)
+	})
+
+	t.Run("Connection hop-by-hop cannot drop forwarded headers", func(t *testing.T) {
+		// Director stripped hop-by-hop headers AFTER the rewrite hook, so a
+		// client listing X-Forwarded-For in Connection could drop the value
+		// the proxy layer just set. Rewrite applies hop-by-hop first, then
+		// our hook copies forwarding headers from the inbound request.
+		r := httptest.NewRequest("GET", "/", nil)
+		r.Header.Set("X-Forwarded-For", "203.0.113.1")
+		r.Header.Set("X-Forwarded-Proto", "https")
+		r.Header.Set("Connection", "X-Forwarded-For, X-Forwarded-Proto")
+		w := httptest.NewRecorder()
+
+		called := false
+		New(&mockTransport{
+			roundTripFunc: func(r *http.Request) (*http.Response, error) {
+				called = true
+				assert.Equal(t, "203.0.113.1", r.Header.Get("X-Forwarded-For"))
+				assert.Equal(t, "https", r.Header.Get("X-Forwarded-Proto"))
+				return httptest.NewRecorder().Result(), nil
+			},
+		}).ServeHandler(nil).ServeHTTP(w, r)
+		assert.True(t, called)
+	})
+
 	t.Run("Override Host", func(t *testing.T) {
 		r := httptest.NewRequest("GET", "/", nil)
 		w := httptest.NewRecorder()

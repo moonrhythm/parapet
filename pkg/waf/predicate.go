@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/google/cel-go/cel"
+	"cel.dev/cel-go/cel"
 )
 
 // Predicate is a standalone compiled CEL boolean expression over the SAME

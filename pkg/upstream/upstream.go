@@ -79,7 +79,8 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 
 	var p http.Handler
 	p = &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			req := pr.Out
 			// Resolve dot-segments on the request path before joining so that
 			// requests like "/foo/../bar" cannot escape the configured prefix.
 			req.URL.Path = singleJoiningSlash(targetPath.Path, cleanRequestPath(req.URL.Path))
@@ -96,12 +97,21 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			if m.Host != "" {
 				req.Host = m.Host
 			}
+
+			// Rewrite strips forwarding headers so a client cannot drop them via
+			// hop-by-hop Connection tokens. Restore the values the proxy layer
+			// already set from its trust policy (and any X-Forwarded-Host /
+			// Forwarded the inbound request still carries).
+			copyHeaderIfPresent(req.Header, pr.In.Header, "X-Forwarded-For")
+			copyHeaderIfPresent(req.Header, pr.In.Header, "X-Forwarded-Host")
+			copyHeaderIfPresent(req.Header, pr.In.Header, "X-Forwarded-Proto")
+			copyHeaderIfPresent(req.Header, pr.In.Header, "Forwarded")
 		},
 		BufferPool: bytesPool,
 		Transport:  &m,
 		ErrorLog:   m.ErrorLog,
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-			if err == context.Canceled {
+			if errors.Is(err, context.Canceled) {
 				// client canceled request
 				return
 			}
@@ -136,20 +146,16 @@ func (m Upstream) ServeHandler(h http.Handler) http.Handler {
 			}
 
 			m.logf("upstream: %v", err)
-			switch err {
-			case ErrUnavailable: // load balancer don't have next upstream
+			if errors.Is(err, ErrUnavailable) {
 				http.Error(w, "Service Unavailable", http.StatusServiceUnavailable)
-			// TODO: timeout is unexposed from http (transport) package
-			default:
-				http.Error(w, "Bad Gateway", http.StatusBadGateway)
+				return
 			}
+			// TODO: timeout is unexposed from http (transport) package
+			http.Error(w, "Bad Gateway", http.StatusBadGateway)
 		},
 	}
 
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		r.RemoteAddr = "" // disable httputil.ReverseProxy to add X-Forwarded-For since we already added
-		p.ServeHTTP(w, r)
-	})
+	return p
 }
 
 // RoundTrip wraps transport round-trip
@@ -202,6 +208,12 @@ func singleJoiningSlash(a, b string) string {
 		return a + "/" + b
 	}
 	return a + b
+}
+
+func copyHeaderIfPresent(dst, src http.Header, key string) {
+	if v, ok := src[key]; ok {
+		dst[key] = v
+	}
 }
 
 type retryContextKey struct{}

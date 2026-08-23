@@ -1,7 +1,7 @@
 package waf
 
 import (
-	"github.com/google/cel-go/cel"
+	"cel.dev/cel-go/cel"
 )
 
 // Rule is a single WAF rule definition.

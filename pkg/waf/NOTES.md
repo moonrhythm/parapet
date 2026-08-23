@@ -1,7 +1,7 @@
 # pkg/waf — implementation notes
 
 This file records what worked, what didn't, and the surprises encountered
-while building the WAF on top of `github.com/google/cel-go`. Future changes
+while building the WAF on top of `cel.dev/cel-go`. Future changes
 should append rather than rewrite — the value is in the historical context.
 
 ## Design decisions that landed
@@ -66,7 +66,7 @@ should append rather than rewrite — the value is in the historical context.
   it, regex rules will silently miss URL-encoded payloads.
 
 - **CEL list iteration**: extracting `[]string` from a `ref.Val` requires
-  `traits.Lister` from `github.com/google/cel-go/common/types/traits` and
+  `traits.Lister` from `cel.dev/cel-go/common/types/traits` and
   iteration via `lister.Iterator()`. The first attempt used a naive
   custom interface with `Get(types.Int)` which is *not* the right
   signature — `Lister.Get` takes `ref.Val`. Iterator avoids that issue
