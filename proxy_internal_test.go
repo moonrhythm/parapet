@@ -111,6 +111,57 @@ func TestParseHost(t *testing.T) {
 	assert.Equal(t, "", parseHost("garbage"))
 }
 
+func TestProxyTrustFillsRealIPFromXFFWhenMissing(t *testing.T) {
+	t.Parallel()
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.1:12345"
+	r.Header.Set("X-Forwarded-For", "203.0.113.5, 1.2.3.4")
+	w := httptest.NewRecorder()
+	(&proxy{
+		Trust: Trusted(),
+		Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "203.0.113.5", r.Header.Get("X-Real-Ip"))
+			assert.Equal(t, "203.0.113.5, 1.2.3.4", r.Header.Get("X-Forwarded-For"))
+		}),
+	}).ServeHTTP(w, r)
+}
+
+func TestProxyTrustFillsRealIPFromPeerWhenHeadersMissing(t *testing.T) {
+	t.Parallel()
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "203.0.113.9:54321"
+	w := httptest.NewRecorder()
+	called := false
+	(&proxy{
+		Trust: Trusted(),
+		Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			called = true
+			assert.Equal(t, "203.0.113.9", r.Header.Get("X-Real-Ip"))
+			assert.Empty(t, r.Header.Get("X-Forwarded-For"))
+			assert.Equal(t, "http", r.Header.Get("X-Forwarded-Proto"))
+		}),
+	}).ServeHTTP(w, r)
+	assert.True(t, called)
+}
+
+func TestProxyTrustKeepsRealIPWhenXFFMissing(t *testing.T) {
+	t.Parallel()
+
+	r := httptest.NewRequest("GET", "/", nil)
+	r.RemoteAddr = "10.0.0.1:12345"
+	r.Header.Set("X-Real-Ip", "203.0.113.5")
+	w := httptest.NewRecorder()
+	(&proxy{
+		Trust: Trusted(),
+		Handler: http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			assert.Equal(t, "203.0.113.5", r.Header.Get("X-Real-Ip"))
+			assert.Empty(t, r.Header.Get("X-Forwarded-For"))
+		}),
+	}).ServeHTTP(w, r)
+}
+
 func TestProxyTrustComputesXFFWhenMissing(t *testing.T) {
 	t.Parallel()
 

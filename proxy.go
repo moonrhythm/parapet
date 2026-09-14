@@ -1,6 +1,7 @@
 package parapet
 
 import (
+	"cmp"
 	"net"
 	"net/http"
 	"strconv"
@@ -115,7 +116,11 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if headerFirst(h, headerXRealIP) == "" {
-		h[headerXRealIP] = []string{firstHost(headerFirst(h, headerXForwardedFor))}
+		// First XFF hop, else the TCP peer (direct client, no forwarded headers).
+		h[headerXRealIP] = []string{cmp.Or(
+			firstHost(headerFirst(h, headerXForwardedFor)),
+			parseHost(r.RemoteAddr),
+		)}
 	}
 
 	if headerFirst(h, headerXForwardedProto) == "" {
