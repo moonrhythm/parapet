@@ -115,7 +115,12 @@ func (m *proxy) trust(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if headerFirst(h, headerXRealIP) == "" {
-		h[headerXRealIP] = []string{firstHost(headerFirst(h, headerXForwardedFor))}
+		// First XFF hop, else the TCP peer (direct client, no forwarded headers).
+		ip := firstHost(headerFirst(h, headerXForwardedFor))
+		if ip == "" {
+			ip = parseHost(r.RemoteAddr)
+		}
+		h[headerXRealIP] = []string{ip}
 	}
 
 	if headerFirst(h, headerXForwardedProto) == "" {
