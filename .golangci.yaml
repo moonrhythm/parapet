@@ -17,6 +17,13 @@ linters:
       - linters:
           - govet
         path: _test\.go
+      # h2c prior-knowledge still uses x/net/http2.Transport (AllowHTTP +
+      # plaintext DialTLSContext). SA1019 started on x/net v0.59; moving to
+      # stdlib http.Transport is a separate change.
+      - linters:
+          - staticcheck
+        path: pkg/upstream/transport\.go
+        text: "SA1019: .*http2\\.Transport"
     paths:
       - third_party$
       - builtin$
