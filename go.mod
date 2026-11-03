@@ -6,7 +6,7 @@ require (
 	cel.dev/cel-go v0.32.0
 	cloud.google.com/go/storage v1.67.1
 	contrib.go.opencensus.io/exporter/stackdriver v0.13.14
-	github.com/go-jose/go-jose/v4 v4.1.5
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/gofrs/uuid v4.4.0+incompatible
 	github.com/google/brotli/go/cbrotli v0.0.0-20240919160234-350100a5bb9d
 	github.com/kavu/go_reuseport v1.5.0
